@@ -1,10 +1,6 @@
-const GITHUB_API_BASE_URL = "https://api.github.com";
-const REPO_OWNER = "Kaikygr";
-const REPO_NAME = "omnizap";
-const CACHE_DURATION = 5 * 60 * 1000;
-const APPROX_BYTES_PER_LINE_OF_CODE = 30;
+const CLIENT_CACHE_DURATION = 1 * 60 * 1000;
 
-const cache = {
+const clientCache = {
   data: {},
   timestamps: {},
   set: function (key, value) {
@@ -13,7 +9,7 @@ const cache = {
   },
   get: function (key) {
     const timestamp = this.timestamps[key];
-    if (timestamp && Date.now() - timestamp < CACHE_DURATION) {
+    if (timestamp && Date.now() - timestamp < CLIENT_CACHE_DURATION) {
       return this.data[key];
     }
     return null;
@@ -22,130 +18,61 @@ const cache = {
 
 async function fetchWithCache(url) {
   const cacheKey = url;
-  const cachedData = cache.get(cacheKey);
+  const cachedData = clientCache.get(cacheKey);
 
   if (cachedData) {
     return cachedData;
   }
+  console.warn("fetchWithCache chamada para uma URL não esperada:", url);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  const data = await response.json();
+  clientCache.set(cacheKey, data);
+  return data;
+}
 
+async function fetchServerData() {
+  const cacheKey = "/api/github-data";
+  const cachedData = clientCache.get(cacheKey);
+
+  if (cachedData) {
+    console.log("Servindo dados do cache do cliente para /api/github-data");
+    return cachedData;
+  }
+
+  console.log("Buscando dados do servidor de /api/github-data");
   try {
-    const headers = {
-      Accept: "application/vnd.github.v3+json",
-    };
-
-    const response = await fetch(url, { headers });
-
-    if (response.status === 401) {
-      let detailedMessage = "Autenticação falhou (401).";
-      try {
-        const errorData = await response.json();
-        if (errorData && errorData.message) {
-          detailedMessage += ` Detalhes: ${errorData.message}`;
-        }
-      } catch (e) {}
-
-      displayGlobalError(
-        detailedMessage + " Verifique seu GITHUB_TOKEN e suas permissões."
-      );
-      throw new Error(detailedMessage);
-    }
-
-    if (response.status === 403) {
-      const ratelimitRemaining = response.headers.get("x-ratelimit-remaining");
-      if (ratelimitRemaining && parseInt(ratelimitRemaining, 10) === 0) {
-        const resetTime = new Date(
-          response.headers.get("x-ratelimit-reset") * 1000
-        );
-        const now = new Date();
-        const waitMinutes = Math.ceil((resetTime - now) / 1000 / 60);
-
-        displayGlobalError(
-          `Muitas requisições. Aguarde ${waitMinutes} minutos ou use o cache.`
-        );
-
-        if (cache.data[cacheKey]) {
-          return cache.data[cacheKey];
-        }
-
-        throw new Error(
-          `Limite de requisições excedido. Tente novamente em ${waitMinutes} minutos.`
-        );
-      } else {
-        const message =
-          "Acesso negado. O recurso pode ser privado ou requerer autenticação.";
-        displayGlobalError(message);
-        throw new Error(message);
-      }
-    }
-
+    const response = await fetch(cacheKey);
     if (!response.ok) {
-      let errorMessage = `${response.status}: ${
-        response.statusText || "Erro desconhecido na API"
-      }`;
+      let errorMessage = `Erro ao buscar dados do servidor: ${response.status} ${response.statusText}`;
       try {
         const errorData = await response.json();
-        if (errorData && errorData.message) {
-          errorMessage = `${response.status}: ${errorData.message}`;
+        if (errorData && (errorData.error || errorData.details)) {
+          errorMessage = `Erro do servidor: ${errorData.error || ""} ${
+            errorData.details || ""
+          }`.trim();
         }
       } catch (e) {}
-      displayGlobalError(`Erro na API: ${errorMessage}`);
+      displayGlobalError(errorMessage);
       throw new Error(errorMessage);
     }
 
     const data = await response.json();
-    cache.set(cacheKey, data);
+
+    if (data.serverError) {
+      displayGlobalError(
+        `Aviso do servidor: ${data.serverError}. Mostrando dados que podem estar desatualizados.`
+      );
+    }
+
+    clientCache.set(cacheKey, data);
     return data;
   } catch (error) {
-    console.error(`Erro inesperado em fetchWithCache para ${url}:`, error);
+    console.error(`Erro ao buscar dados de ${cacheKey}:`, error);
     displayGlobalError(
-      `Ocorreu um erro inesperado ao buscar dados: ${error.message}. Tente novamente mais tarde.`
+      `Falha ao comunicar com o servidor: ${error.message}. Tente novamente mais tarde.`
     );
     throw error;
-  }
-}
-
-async function fetchRepoDetails() {
-  return fetchWithCache(
-    `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}`
-  );
-}
-
-async function fetchRecentCommits(count = 5) {
-  return fetchWithCache(
-    `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=${count}`
-  );
-}
-
-async function fetchIssues(count = 5) {
-  return fetchWithCache(
-    `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/issues?per_page=${count}&state=all`
-  );
-}
-
-async function fetchLanguages() {
-  return fetchWithCache(
-    `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/languages`
-  );
-}
-
-async function fetchLicenseInfo() {
-  try {
-    return await fetchWithCache(
-      `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/license`
-    );
-  } catch (error) {
-    return { name: "Não especificada" };
-  }
-}
-
-async function fetchCodeStats() {
-  try {
-    const languages = await fetchLanguages();
-    const totalBytes = Object.values(languages).reduce((a, b) => a + b, 0);
-    return Math.round(totalBytes / APPROX_BYTES_PER_LINE_OF_CODE);
-  } catch (error) {
-    console.error("Erro ao calcular linhas de código:", error);
-    return 0;
   }
 }
 
@@ -283,9 +210,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("currentYear").textContent = new Date().getFullYear();
 
   try {
-    const repoDetails = await fetchRepoDetails();
+    const serverData = await fetchServerData();
+
+    if (!serverData) {
+      displayGlobalError(
+        "Não foi possível carregar os dados do projeto do servidor."
+      );
+      document
+        .querySelectorAll(".loading-placeholder")
+        .forEach((el) => (el.textContent = "Erro ao carregar"));
+      return;
+    }
+
+    const {
+      repoDetails,
+      commits,
+      issues,
+      languages,
+      licenseInfo,
+      locCount,
+      serverLastUpdated,
+    } = serverData;
+
     if (repoDetails) {
-      setText("pageTitle", `Projeto: ${repoDetails.name || REPO_NAME}`);
+      const fallbackProjectName = "omnizap";
+      setText(
+        "pageTitle",
+        `Projeto: ${repoDetails.name || fallbackProjectName}`
+      );
       setText("projectName", repoDetails.name);
       setText("projectOwner", repoDetails.owner?.login);
       setText("projectDescription", repoDetails.description);
@@ -300,15 +252,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       );
       setLink("projectHtmlUrl", repoDetails.html_url);
     }
-
-    const [commits, issues, languages, licenseInfo, locCount] =
-      await Promise.all([
-        fetchRecentCommits(5),
-        fetchIssues(5),
-        fetchLanguages(),
-        fetchLicenseInfo(),
-        fetchCodeStats(),
-      ]);
 
     const commitList = document.getElementById("commitList");
     commitList.innerHTML = "";
@@ -345,25 +288,42 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const languagesChart = document.getElementById("languagesChart");
     languagesChart.innerHTML = "";
-    if (languages) {
+    if (languages && Object.keys(languages).length > 0) {
       const total = Object.values(languages).reduce((a, b) => a + b, 0);
       const colors = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
 
       Object.entries(languages)
         .sort(([, a], [, b]) => b - a)
         .forEach(([lang, bytes], index) => {
-          const percentage = (bytes / total) * 100;
-          const color = colors[index % colors.length];
-          languagesChart.appendChild(
-            createLanguageBar(lang, percentage, color)
-          );
+          if (total > 0) {
+            const percentage = (bytes / total) * 100;
+            const color = colors[index % colors.length];
+            languagesChart.appendChild(
+              createLanguageBar(lang, percentage, color)
+            );
+          }
         });
+    } else {
+      const noLanguages = document.createElement("p");
+      noLanguages.className = "text-slate-600 dark:text-slate-400";
+      noLanguages.textContent = "Dados de linguagens não disponíveis.";
+      languagesChart.appendChild(noLanguages);
     }
 
-    setText("licenseInfo", licenseInfo.license?.name || licenseInfo.name);
-    setText("locCount", locCount.toLocaleString("pt-BR") + " linhas");
+    setText(
+      "licenseInfo",
+      licenseInfo?.license?.name || licenseInfo?.name || "Não especificada"
+    );
+    setText(
+      "locCount",
+      locCount > 0 ? locCount.toLocaleString("pt-BR") + " linhas" : "N/A"
+    );
   } catch (error) {
-    displayGlobalError(error.message);
+    console.error("Erro principal no carregamento da página:", error);
+    displayGlobalError(
+      error.message ||
+        "Ocorreu um erro crítico ao carregar os dados. Tente recarregar a página."
+    );
   }
 });
 
