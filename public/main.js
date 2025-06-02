@@ -1,80 +1,203 @@
-const CLIENT_CACHE_DURATION = 1 * 60 * 1000;
-
-const clientCache = {
-  data: {},
-  timestamps: {},
-  set: function (key, value) {
-    this.data[key] = value;
-    this.timestamps[key] = Date.now();
+const CONFIG = {
+  CACHE_DURATION: 5 * 60 * 1000,
+  DATE_FORMAT: {
+    dateStyle: "medium",
+    timeStyle: "short",
   },
-  get: function (key) {
-    const timestamp = this.timestamps[key];
-    if (timestamp && Date.now() - timestamp < CLIENT_CACHE_DURATION) {
-      return this.data[key];
-    }
-    return null;
+  API_ENDPOINTS: {
+    GITHUB: "/api/github-data",
+    VISITS: "/api/visits/count",
   },
 };
 
-async function fetchWithCache(url) {
+const clientCache = {
+  data: new Map(),
+  set(key, value, duration = CONFIG.CACHE_DURATION) {
+    const item = {
+      value,
+      timestamp: Date.now(),
+      expiry: Date.now() + duration,
+    };
+    this.data.set(key, item);
+    return item;
+  },
+  get(key) {
+    const item = this.data.get(key);
+    if (!item) return null;
+    if (Date.now() > item.expiry) {
+      this.data.delete(key);
+      return null;
+    }
+    return item.value;
+  },
+  clear() {
+    this.data.clear();
+  },
+};
+
+async function fetchWithCache(url, options = {}) {
   const cacheKey = url;
   const cachedData = clientCache.get(cacheKey);
 
   if (cachedData) {
     return cachedData;
   }
-  console.warn("fetchWithCache chamada para uma URL não esperada:", url);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-  const data = await response.json();
-  clientCache.set(cacheKey, data);
-  return data;
-}
 
-async function fetchServerData() {
-  const cacheKey = "/api/github-data";
-  const cachedData = clientCache.get(cacheKey);
-
-  if (cachedData) {
-    console.log("Servindo dados do cache do cliente para /api/github-data");
-    return cachedData;
-  }
-
-  console.log("Buscando dados do servidor de /api/github-data");
   try {
-    const response = await fetch(cacheKey);
+    const response = await fetch(url, options);
     if (!response.ok) {
-      let errorMessage = `Erro ao buscar dados do servidor: ${response.status} ${response.statusText}`;
-      try {
-        const errorData = await response.json();
-        if (errorData && (errorData.error || errorData.details)) {
-          errorMessage = `Erro do servidor: ${errorData.error || ""} ${
-            errorData.details || ""
-          }`.trim();
-        }
-      } catch (e) {}
-      displayGlobalError(errorMessage);
-      throw new Error(errorMessage);
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-
     const data = await response.json();
-
-    if (data.serverError) {
-      displayGlobalError(
-        `Aviso do servidor: ${data.serverError}. Mostrando dados que podem estar desatualizados.`
-      );
-    }
-
     clientCache.set(cacheKey, data);
     return data;
   } catch (error) {
-    console.error(`Erro ao buscar dados de ${cacheKey}:`, error);
-    displayGlobalError(
-      `Falha ao comunicar com o servidor: ${error.message}. Tente novamente mais tarde.`
-    );
+    console.error(`Erro ao buscar ${url}:`, error);
     throw error;
   }
 }
+
+async function fetchServerData() {
+  try {
+    const data = await fetchWithCache(CONFIG.API_ENDPOINTS.GITHUB);
+    if (data.serverError) {
+      displayGlobalError(
+        `Aviso: ${data.serverError}. Os dados podem estar desatualizados.`
+      );
+    }
+    return data;
+  } catch (error) {
+    const message = `Falha ao comunicar com o servidor: ${error.message}`;
+    displayGlobalError(message);
+    throw error;
+  }
+}
+
+const formatDate = (date) =>
+  new Date(date).toLocaleString("pt-BR", CONFIG.DATE_FORMAT);
+const formatNumber = (num) => num?.toLocaleString("pt-BR") || "0";
+
+function updateUI(data) {
+  const { repoDetails, commits, issues, languages, licenseInfo, locCount } =
+    data;
+
+  if (repoDetails) {
+    const fallbackProjectName = "omnizap";
+    setText("pageTitle", `Projeto: ${repoDetails.name || fallbackProjectName}`);
+    setText("projectName", repoDetails.name);
+    setText("projectOwner", repoDetails.owner?.login);
+    setText("projectDescription", repoDetails.description);
+    setText("projectLanguage", repoDetails.language);
+    setText("stargazersCount", formatNumber(repoDetails.stargazers_count));
+    setText("forksCount", formatNumber(repoDetails.forks_count));
+    setText("watchersCount", formatNumber(repoDetails.subscribers_count));
+    setText("repoSize", `${(repoDetails.size / 1024).toFixed(2)} MB`);
+    setText("lastUpdated", formatDate(repoDetails.updated_at));
+    setText("createdAt", formatDate(repoDetails.created_at));
+    setText("pushedAt", formatDate(repoDetails.pushed_at));
+    setText("openIssuesCount", formatNumber(repoDetails.open_issues_count));
+    setLink("projectHtmlUrl", repoDetails.html_url);
+  }
+
+  const commitList = document.getElementById("commitList");
+  commitList.innerHTML = "";
+  if (commits && commits.length > 0) {
+    commits.forEach((commit, index) => {
+      const commitElement = createCommitElement(commit);
+      commitElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
+      commitList.appendChild(commitElement);
+    });
+  } else {
+    const noCommits = document.createElement("p");
+    noCommits.className = "text-slate-600 dark:text-slate-400";
+    noCommits.textContent = "Nenhum commit encontrado.";
+    commitList.appendChild(noCommits);
+  }
+
+  const issuesList = document.getElementById("issuesList");
+  issuesList.innerHTML = "";
+  if (issues && issues.length > 0) {
+    issues.forEach((issue, index) => {
+      const issueElement = createIssueElement(issue);
+      issueElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
+      issuesList.appendChild(issueElement);
+    });
+  } else {
+    const noIssues = document.createElement("p");
+    noIssues.className = "text-slate-600 dark:text-slate-400";
+    noIssues.textContent = "Nenhuma issue encontrada.";
+    issuesList.appendChild(noIssues);
+  }
+
+  const languagesChart = document.getElementById("languagesChart");
+  languagesChart.innerHTML = "";
+  if (languages && Object.keys(languages).length > 0) {
+    const total = Object.values(languages).reduce((a, b) => a + b, 0);
+    const colors = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"];
+
+    Object.entries(languages)
+      .sort(([, a], [, b]) => b - a)
+      .forEach(([lang, bytes], index) => {
+        if (total > 0) {
+          const percentage = (bytes / total) * 100;
+          const color = colors[index % colors.length];
+          languagesChart.appendChild(
+            createLanguageBar(lang, percentage, color)
+          );
+        }
+      });
+  } else {
+    const noLanguages = document.createElement("p");
+    noLanguages.className = "text-slate-600 dark:text-slate-400";
+    noLanguages.textContent = "Dados de linguagens não disponíveis.";
+    languagesChart.appendChild(noLanguages);
+  }
+
+  setText(
+    "licenseInfo",
+    licenseInfo?.license?.name || licenseInfo?.name || "Não especificada"
+  );
+  setText(
+    "locCount",
+    locCount > 0 ? locCount.toLocaleString("pt-BR") + " linhas" : "N/A"
+  );
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  document.getElementById("currentYear").textContent = new Date().getFullYear();
+
+  try {
+    const [serverData, visitsData] = await Promise.all([
+      fetchServerData(),
+      fetchWithCache(CONFIG.API_ENDPOINTS.VISITS),
+    ]);
+
+    if (serverData) {
+      updateUI(serverData);
+    }
+
+    if (visitsData) {
+      setText("visitCount", formatNumber(visitsData.totalVisits));
+    }
+  } catch (error) {
+    console.error("Erro ao carregar dados:", error);
+    displayGlobalError(
+      "Ocorreu um erro ao carregar os dados. Tente recarregar a página."
+    );
+  }
+});
+
+document
+  .getElementById("mobileMenuButton")
+  .addEventListener("click", function () {
+    const navMenu = document.getElementById("navMenu");
+    const menuIcon = this.querySelector(".menu-icon");
+    const closeIcon = this.querySelector(".close-icon");
+
+    navMenu.classList.toggle("hidden");
+    menuIcon.classList.toggle("hidden");
+    closeIcon.classList.toggle("hidden");
+  });
 
 function displayGlobalError(message) {
   const errorDiv = document.getElementById("errorMessageGlobal");
@@ -206,8 +329,22 @@ function createLanguageBar(language, percentage, color) {
   return div;
 }
 
+async function updateVisitCount() {
+  try {
+    const response = await fetch("/api/visits/count");
+    const data = await response.json();
+    const visitsElement = document.getElementById("visitCount");
+    if (visitsElement) {
+      visitsElement.textContent = data.totalVisits.toLocaleString("pt-BR");
+    }
+  } catch (error) {
+    console.error("Erro ao buscar contagem de visitas:", error);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("currentYear").textContent = new Date().getFullYear();
+  await updateVisitCount();
 
   try {
     const serverData = await fetchServerData();
@@ -250,6 +387,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         "lastUpdated",
         new Date(repoDetails.updated_at).toLocaleString("pt-BR")
       );
+      setText(
+        "createdAt",
+        new Date(repoDetails.created_at).toLocaleString("pt-BR")
+      );
+      setText(
+        "pushedAt",
+        new Date(repoDetails.pushed_at).toLocaleString("pt-BR")
+      );
+      setText("openIssuesCount", repoDetails.open_issues_count?.toString());
       setLink("projectHtmlUrl", repoDetails.html_url);
     }
 
@@ -326,15 +472,3 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }
 });
-
-document
-  .getElementById("mobileMenuButton")
-  .addEventListener("click", function () {
-    const navMenu = document.getElementById("navMenu");
-    const menuIcon = this.querySelector(".menu-icon");
-    const closeIcon = this.querySelector(".close-icon");
-
-    navMenu.classList.toggle("hidden");
-    menuIcon.classList.toggle("hidden");
-    closeIcon.classList.toggle("hidden");
-  });

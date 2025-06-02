@@ -174,6 +174,44 @@
           <span>Linhas de Código:
             <strong id="locCount" class="dark:text-slate-100 loading-placeholder">Carregando...</strong></span>
         </div>
+
+        <div
+          class="flex items-center gap-2 sm:gap-3 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700 p-2 sm:p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors duration-200">
+          <svg class="w-4 h-4 text-sky-600 dark:text-sky-500 flex-shrink-0" fill="none" stroke="currentColor"
+            viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4">
+            </path>
+          </svg>
+          <span>Criado em:
+            <strong id="createdAt" class="dark:text-slate-100 loading-placeholder">Carregando...</strong>
+          </span>
+        </div>
+
+        <div
+          class="flex items-center gap-2 sm:gap-3 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700 p-2 sm:p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors duration-200">
+          <svg class="w-4 h-4 text-sky-600 dark:text-sky-500 flex-shrink-0" fill="none" stroke="currentColor"
+            viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <span>Último Push:
+            <strong id="pushedAt" class="dark:text-slate-100 loading-placeholder">Carregando...</strong>
+          </span>
+        </div>
+
+        <div
+          class="flex items-center gap-2 sm:gap-3 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700 p-2 sm:p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors duration-200">
+          <svg class="w-4 h-4 text-sky-600 dark:text-sky-500 flex-shrink-0" fill="none" stroke="currentColor"
+            viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+            </path>
+          </svg>
+          <span>Issues Abertas:
+            <strong id="openIssuesCount" class="dark:text-slate-100 loading-placeholder">Carregando...</strong>
+          </span>
+        </div>
       </div>
 
       <div class="mt-6">
@@ -228,8 +266,11 @@
 
   <footer class="bg-slate-800 dark:bg-slate-900 text-slate-300 dark:text-slate-400 text-center py-4 sm:py-6 mt-auto">
     <div class="container mx-auto px-4">
-      <p>
+      <p class="mb-2">
         &copy; <span id="currentYear"></span> Informações do Projeto Omnizap
+      </p>
+      <p class="text-sm">
+        Total de visitas: <span id="visitCount" class="font-bold">0</span>
       </p>
     </div>
   </footer>
