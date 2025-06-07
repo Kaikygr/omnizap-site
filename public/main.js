@@ -178,6 +178,10 @@ function updateUI(data) {
     locCount > 0 ? locCount.toLocaleString("pt-BR") + " linhas" : "N/A"
   );
 
+  // Remove seções que mostram dados vazios/sem dados
+  // As seções de Releases, Code Frequency, Forks e Dependências foram removidas
+  // para evitar mostrar mensagens de "sem dados" ao usuário
+
   // Populate new stats in the "Estatísticas e Gráficos" section
   if (repoDetails) {
     setText("statsOpenIssues", formatNumber(repoDetails.open_issues_count));
@@ -188,58 +192,6 @@ function updateUI(data) {
   if (issues) {
     setText("statsRecentIssues", formatNumber(issues.length));
   }
-
-  // Releases
-  const releaseListElement = document.getElementById("releaseList");
-  releaseListElement.innerHTML = "";
-  if (releases && releases.length > 0) {
-    releases.forEach((release, index) => {
-      const releaseElement = createReleaseElement(release);
-      releaseElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
-      releaseListElement.appendChild(releaseElement);
-    });
-  } else {
-    releaseListElement.innerHTML =
-      '<p class="text-gray-600 dark:text-gray-300">Nenhuma release encontrada.</p>';
-  }
-
-  // Code Frequency
-  const codeFrequencyChartElement =
-    document.getElementById("codeFrequencyChart");
-  codeFrequencyChartElement.innerHTML = "";
-  if (codeFrequency && codeFrequency.length > 0) {
-    const chartContainer = createCodeFrequencyChart(codeFrequency);
-    codeFrequencyChartElement.appendChild(chartContainer);
-  } else {
-    codeFrequencyChartElement.innerHTML =
-      '<p class="text-gray-600 dark:text-gray-300">Dados de frequência de código não disponíveis.</p>';
-  }
-
-  // Forks List
-  const forksListElement = document.getElementById("forksList");
-  forksListElement.innerHTML = "";
-  if (forksList && forksList.length > 0) {
-    forksList.slice(0, 5).forEach((forkData, index) => {
-      // Displaying up to 5 forks
-      const forkElement = createForkElement(forkData);
-      forkElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
-      forksListElement.appendChild(forkElement);
-    });
-  } else {
-    forksListElement.innerHTML =
-      '<p class="text-gray-600 dark:text-gray-300">Nenhum fork recente para listar ou dados não disponíveis.</p>';
-  }
-
-  // Dependencies (Placeholder logic)
-  const dependenciesListElement = document.getElementById("dependenciesList");
-  if (data.dependencies && data.dependencies.length > 0) {
-    dependenciesListElement.innerHTML =
-      '<ul class="list-disc list-inside"></ul>';
-    const ul = dependenciesListElement.querySelector("ul");
-    data.dependencies.forEach(
-      (dep) => (ul.innerHTML += `<li>${sanitizeHTML(dep.name || dep)}</li>`)
-    );
-  } // Else, the placeholder text from HTML remains.
 }
 
 function displayGlobalError(message) {
@@ -377,115 +329,6 @@ function createLanguageBar(language, percentage, color) {
   div.appendChild(label);
   div.appendChild(barContainer);
 
-  return div;
-}
-
-function createReleaseElement(release) {
-  const div = document.createElement("div");
-  div.className =
-    "bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg list-item-animated border border-gray-200 dark:border-gray-600/70";
-
-  const header = document.createElement("div");
-  header.className = "flex justify-between items-center mb-2";
-
-  const nameLink = document.createElement("a");
-  nameLink.href = release.html_url;
-  nameLink.target = "_blank";
-  nameLink.className =
-    "text-lg font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300";
-  nameLink.textContent = release.name || release.tag_name;
-
-  const publishedDate = document.createElement("span");
-  publishedDate.className = "text-xs text-gray-500 dark:text-gray-400";
-  publishedDate.textContent = `Lançado em: ${formatDate(release.published_at)}`;
-
-  header.appendChild(nameLink);
-  header.appendChild(publishedDate);
-  div.appendChild(header);
-
-  if (release.body) {
-    const body = document.createElement("p");
-    body.className =
-      "text-sm text-gray-700 dark:text-gray-200 mt-1 prose prose-sm dark:prose-invert max-w-none";
-    // Basic sanitization for description, limit length for preview
-    const firstLine = release.body.split("\n")[0];
-    body.textContent =
-      firstLine.length > 150 ? firstLine.substring(0, 150) + "..." : firstLine;
-    // For full body, consider a "show more" or using a markdown parser if body is markdown
-    div.appendChild(body);
-  }
-  return div;
-}
-
-function createCodeFrequencyChart(codeFrequencyData) {
-  const container = document.createElement("div");
-  container.className = "flex space-x-1 h-40 items-end"; // Container for bars
-
-  // Find max absolute change for scaling
-  let maxChange = 0;
-  codeFrequencyData.forEach((weekData) => {
-    maxChange = Math.max(
-      maxChange,
-      Math.abs(weekData[1]),
-      Math.abs(weekData[2])
-    );
-  });
-  if (maxChange === 0) maxChange = 1; // Avoid division by zero
-
-  codeFrequencyData.slice(-52).forEach((weekData) => {
-    // Show last 52 weeks (1 year)
-    const timestamp = weekData[0];
-    const additions = weekData[1];
-    const deletions = Math.abs(weekData[2]); // Deletions are negative
-
-    const weekContainer = document.createElement("div");
-    weekContainer.className =
-      "flex flex-col items-center flex-grow min-w-[10px]"; // Each week's bar group
-
-    const barGroup = document.createElement("div");
-    barGroup.className = "flex items-end h-full";
-
-    if (additions > 0) {
-      const additionsBar = document.createElement("div");
-      additionsBar.className = "bg-green-500";
-      additionsBar.style.height = `${(additions / maxChange) * 100}%`;
-      additionsBar.style.width = "5px"; // Fixed width for additions bar
-      additionsBar.title = `+${formatNumber(additions)} adições`;
-      barGroup.appendChild(additionsBar);
-    }
-
-    if (deletions > 0) {
-      const deletionsBar = document.createElement("div");
-      deletionsBar.className = "bg-red-500 ml-px"; // ml-px for a tiny space
-      deletionsBar.style.height = `${(deletions / maxChange) * 100}%`;
-      deletionsBar.style.width = "5px"; // Fixed width for deletions bar
-      deletionsBar.title = `-${formatNumber(deletions)} deleções`;
-      barGroup.appendChild(deletionsBar);
-    }
-
-    weekContainer.appendChild(barGroup);
-    // Optional: Add date label below bars
-    // const dateLabel = document.createElement('div');
-    // dateLabel.className = 'text-xs text-gray-400 mt-1 transform -rotate-45 whitespace-nowrap';
-    // dateLabel.textContent = new Date(timestamp * 1000).toLocaleDateString('pt-BR', { month: 'short', day: 'numeric'});
-    // weekContainer.appendChild(dateLabel);
-
-    container.appendChild(weekContainer);
-  });
-  return container;
-}
-
-function createForkElement(forkData) {
-  const div = document.createElement("div");
-  div.className =
-    "bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md list-item-animated border border-gray-200 dark:border-gray-600/70";
-  const link = document.createElement("a");
-  link.href = forkData.html_url;
-  link.target = "_blank";
-  link.className =
-    "text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium";
-  link.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline-block mr-1.5 -mt-px" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" /></svg> ${sanitizeHTML(forkData.full_name)}`;
-  div.appendChild(link);
   return div;
 }
 

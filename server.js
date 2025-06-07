@@ -3,7 +3,7 @@ const fs = require("fs").promises;
 const path = require("path");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
-const morgan = "morgan";
+const morgan = require("morgan");
 const useragent = require("express-useragent");
 const cheerio = require("cheerio"); // Adicionado Cheerio
 require("dotenv").config();
@@ -29,6 +29,15 @@ let githubDataCache = {
 
 const app = express();
 
+// Middlewares de segurança
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 app.use(compression());
 
 const apiLimiter = rateLimit({
@@ -40,8 +49,7 @@ const apiLimiter = rateLimit({
 app.use(apiLimiter);
 
 app.use(
-  require("morgan")("combined", {
-    // Corrigido o require do morgan
+  morgan("combined", {
     stream: {
       write: (message) => console.log(message.trim()),
     },
@@ -142,101 +150,215 @@ app.get("/api/visits/count", async (req, res) => {
   }
 });
 
+// Endpoint de saúde do servidor
+app.get("/api/health", async (req, res) => {
+  try {
+    const cache = await readGithubCache();
+    const visitsData = await readVisits();
+
+    res.json({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      cache: {
+        lastUpdated: cache.lastUpdated,
+        hasData: !!cache.data,
+        hasError: !!cache.error,
+      },
+      visits: {
+        total: visitsData.totalVisits || 0,
+        hasData: !!visitsData.visits,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "unhealthy",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 async function fetchGitHubAPI(endpoint) {
   const headers = {
     Accept: "application/vnd.github.v3+json",
+    "User-Agent": "omnizap-site/1.0.0",
   };
-  if (GITHUB_TOKEN) {
-    headers.Authorization = `token ${GITHUB_TOKEN}`;
-  }
-  const response = await fetch(`${GITHUB_API_BASE_URL}${endpoint}`, {
-    headers,
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(
-      `GitHub API Error for ${endpoint}: ${response.status} ${response.statusText}`,
-      errorText
-    );
-    throw new Error(
-      `GitHub API Error: ${response.status} ${response.statusText}`
-    );
-  }
-  return response.json();
-}
 
-// Nova função para buscar e raspar uma página HTML
-async function fetchAndScrapePage(urlPath, parserFunction) {
-  const url = `${GITHUB_BASE_URL}${urlPath}`;
+  if (GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+  }
+
   try {
-    const response = await fetch(url);
+    const response = await fetch(`${GITHUB_API_BASE_URL}${endpoint}`, {
+      headers,
+      timeout: 10000, // 10 segundos de timeout
+    });
+
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status} for ${url}`);
+      const errorText = await response.text();
+      console.error(
+        `GitHub API Error for ${endpoint}: ${response.status} ${response.statusText}`,
+        errorText
+      );
+      throw new Error(
+        `GitHub API Error: ${response.status} ${response.statusText}`
+      );
     }
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    return parserFunction($);
+
+    return await response.json();
   } catch (error) {
-    console.error(`Erro ao raspar ${url}:`, error);
+    console.error(`Erro ao buscar ${endpoint}:`, error.message);
     throw error;
   }
 }
 
-// Parser para a página de Releases
-function parseReleasesPage($) {
-  const releases = [];
-  // Seletor para cada item de release. Este seletor é um exemplo e PODE MUDAR.
-  // Inspecione a página de releases do GitHub para encontrar os seletores corretos.
-  $("div.repository-content div.Box > div.Box-row").each((i, el) => {
-    const $el = $(el);
-    const nameAndTag = $el.find("h2 a").first().text().trim(); // Pode conter nome e tag
-    const html_url = GITHUB_BASE_URL + $el.find("h2 a").first().attr("href");
-    const published_at_text = $el.find("relative-time").attr("datetime");
-    const body_html = $el.find(".markdown-body").html(); // Pega o HTML do corpo
+// Função melhorada para buscar e raspar uma página HTML
+async function fetchAndScrapePage(urlPath, parserFunction) {
+  const url = `${GITHUB_BASE_URL}${urlPath}`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "omnizap-site/1.0.0",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      timeout: 15000, // 15 segundos de timeout
+    });
 
-    // Tenta extrair nome e tag separadamente se possível, ou usa o combinado
-    let name = nameAndTag;
-    let tag_name = nameAndTag; // Fallback
-
-    // Exemplo de como poderia ser se o nome e a tag estivessem em elementos diferentes ou com estrutura previsível
-    // const name = $el.find('.release-title').text().trim();
-    // const tag_name = $el.find('.release-tag-name').text().trim();
-
-    if (nameAndTag && html_url && published_at_text) {
-      releases.push({
-        name: name,
-        tag_name: tag_name,
-        html_url: html_url,
-        published_at: published_at_text, // A data já está em formato ISO
-        body: body_html
-          ? body_html.trim().split("\n")[0].substring(0, 200) + "..."
-          : "Sem descrição.", // Pega o HTML e trunca
-      });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status} for ${url}`);
     }
-  });
-  return releases.slice(0, 5); // Retorna as 5 mais recentes (a ordem na página geralmente é da mais nova para mais antiga)
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    return parserFunction($);
+  } catch (error) {
+    console.error(`Erro ao raspar ${url}:`, error.message);
+    throw error;
+  }
 }
 
-// Parser para a página de Forks
-function parseForksPage($) {
-  const forks = [];
-  // Seletor para cada item de fork. Este seletor é um exemplo e PODE MUDAR.
-  // Inspecione a página de forks do GitHub (ex: /Kaikygr/omnizap/forks)
-  $("div[data-testid='list-view-item-container']").each((i, el) => {
-    const $el = $(el);
-    const full_name_anchor = $el.find("a[data-hovercard-type='repository']");
-    const full_name = full_name_anchor.text().trim().replace(/\s+/g, ""); // Remove espaços
-    const html_url = GITHUB_BASE_URL + full_name_anchor.attr("href");
+// Parser melhorado para a página de Releases
+function parseReleasesPage($) {
+  const releases = [];
 
-    if (full_name && html_url) {
-      forks.push({
-        full_name: full_name,
-        html_url: html_url,
-        // Outros dados como 'stargazers_count' são mais difíceis de pegar consistentemente via scraping aqui
-      });
+  // Tenta múltiplos seletores para compatibilidade
+  const selectors = [
+    "div.repository-content div.Box > div.Box-row",
+    "[data-testid='release-card']",
+    ".release-entry",
+  ];
+
+  let releaseElements = $();
+  for (const selector of selectors) {
+    releaseElements = $(selector);
+    if (releaseElements.length > 0) break;
+  }
+
+  releaseElements.each((i, el) => {
+    try {
+      const $el = $(el);
+      const nameAndTag = $el
+        .find("h2 a, .release-header a, .f1 a")
+        .first()
+        .text()
+        .trim();
+      const href = $el
+        .find("h2 a, .release-header a, .f1 a")
+        .first()
+        .attr("href");
+      const html_url = href ? GITHUB_BASE_URL + href : null;
+      const published_at_text = $el
+        .find("relative-time, .datetime")
+        .attr("datetime");
+      const body_html = $el.find(".markdown-body, .release-body").html();
+
+      if (nameAndTag && html_url && published_at_text) {
+        let name = nameAndTag;
+        let tag_name = nameAndTag;
+
+        // Tenta extrair tag se há um padrão reconhecível
+        const tagMatch = nameAndTag.match(/^(.*?)\s*(v?\d+\.\d+\.\d+.*)$/);
+        if (tagMatch) {
+          name = tagMatch[1].trim() || nameAndTag;
+          tag_name = tagMatch[2].trim();
+        }
+
+        releases.push({
+          name: name,
+          tag_name: tag_name,
+          html_url: html_url,
+          published_at: published_at_text,
+          body: body_html
+            ? body_html
+                .trim()
+                .replace(/<[^>]*>/g, "")
+                .substring(0, 200) + "..."
+            : "Sem descrição.",
+        });
+      }
+    } catch (error) {
+      console.warn("Erro ao processar release:", error.message);
     }
   });
-  return forks.slice(0, 5); // Retorna os 5 primeiros listados
+
+  return releases.slice(0, 5);
+}
+
+// Parser melhorado para a página de Forks
+function parseForksPage($) {
+  const forks = [];
+
+  // Tenta múltiplos seletores para compatibilidade
+  const selectors = [
+    "div[data-testid='list-view-item-container']",
+    ".fork-entry",
+    ".Box-row",
+  ];
+
+  let forkElements = $();
+  for (const selector of selectors) {
+    forkElements = $(selector);
+    if (forkElements.length > 0) break;
+  }
+
+  forkElements.each((i, el) => {
+    try {
+      const $el = $(el);
+      const full_name_anchor = $el
+        .find("a[data-hovercard-type='repository'], .f4 a, h3 a")
+        .first();
+      const full_name = full_name_anchor.text().trim().replace(/\s+/g, "");
+      const href = full_name_anchor.attr("href");
+      const html_url = href ? GITHUB_BASE_URL + href : null;
+
+      // Tenta extrair informações adicionais se disponíveis
+      const description = $el.find(".f6, .text-gray").first().text().trim();
+      const starCount = $el
+        .find("[data-testid='star-count'], .octicon-star")
+        .parent()
+        .text()
+        .trim();
+
+      if (full_name && html_url) {
+        const forkData = {
+          full_name: full_name,
+          html_url: html_url,
+        };
+
+        if (description) forkData.description = description;
+        if (starCount) forkData.stargazers_count = parseInt(starCount) || 0;
+
+        forks.push(forkData);
+      }
+    } catch (error) {
+      console.warn("Erro ao processar fork:", error.message);
+    }
+  });
+
+  return forks.slice(0, 5);
 }
 
 async function readGithubCache() {
@@ -285,70 +407,36 @@ async function updateGitHubDataCache() {
 
   try {
     // Dados que continuarão vindo da API por confiabilidade e disponibilidade
-    const repoDetailsPromise = fetchGitHubAPI(
-      `/repos/${REPO_OWNER}/${REPO_NAME}`
-    );
-    const commitsPromise = fetchGitHubAPI(
-      `/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=5`
-    );
-    const issuesPromise = fetchGitHubAPI(
-      `/repos/${REPO_OWNER}/${REPO_NAME}/issues?per_page=5&state=all`
-    );
-    const languagesPromise = fetchGitHubAPI(
-      `/repos/${REPO_OWNER}/${REPO_NAME}/languages`
-    );
-    const licensePromise = fetchGitHubAPI(
-      `/repos/${REPO_OWNER}/${REPO_NAME}/license`
-    ).catch((err) => {
-      if (err.message && err.message.includes("404"))
-        return { name: "Não especificada" };
-      throw err;
-    });
-    const codeFrequencyPromise = fetchGitHubAPI(
-      // Mantido via API, scraping do gráfico não é viável
-      `/repos/${REPO_OWNER}/${REPO_NAME}/stats/code_frequency`
-    );
-
-    // Dados via Scraping
-    const releasesPromise = fetchAndScrapePage(
-      `/${REPO_OWNER}/${REPO_NAME}/releases`,
-      parseReleasesPage
-    );
-    const forksListPromise = fetchAndScrapePage(
-      `/${REPO_OWNER}/${REPO_NAME}/forks`,
-      parseForksPage
-    );
+    const apiPromises = [
+      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}`),
+      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=5`),
+      fetchGitHubAPI(
+        `/repos/${REPO_OWNER}/${REPO_NAME}/issues?per_page=5&state=all`
+      ),
+      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/languages`),
+      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/license`).catch(
+        (err) => {
+          if (err.message && err.message.includes("404"))
+            return { name: "Não especificada" };
+          throw err;
+        }
+      ),
+    ];
 
     const [repoDetails, commits, issues, languages, license] =
-      await Promise.all([
-        repoDetailsPromise,
-        commitsPromise,
-        issuesPromise,
-        languagesPromise,
-        licensePromise,
-      ]);
+      await Promise.all(apiPromises);
 
+    // Busca de dados via API com tratamento de erro individual
     let codeFrequency = [];
-    try {
-      codeFrequency = await codeFrequencyPromise;
-    } catch (e) {
-      console.warn("Falha ao buscar frequência de código (API):", e.message);
-    }
+    // Removido: coleta de dados de frequência de código não é mais necessária
+    // para evitar seções vazias na interface
 
+    // Dados via Scraping com retry logic - REMOVIDOS
+    // Removido: scraping de releases e forks não é mais necessário
     let releases = [];
     let forksList = [];
 
-    try {
-      releases = await releasesPromise;
-    } catch (e) {
-      console.warn("Falha ao raspar releases:", e.message);
-    }
-    try {
-      forksList = await forksListPromise;
-    } catch (e) {
-      console.warn("Falha ao raspar lista de forks:", e.message);
-    }
-
+    // Calcula LOC de forma mais precisa
     let locCount = 0;
     if (languages && Object.keys(languages).length > 0) {
       const totalBytes = Object.values(languages).reduce((a, b) => a + b, 0);
@@ -365,11 +453,15 @@ async function updateGitHubDataCache() {
         languages,
         licenseInfo: license.license || license,
         locCount,
-        releases, // Agora vem do scraping
-        codeFrequency, // Continua da API
-        forksList, // Agora vem do scraping
-        // dependencies: [], // Placeholder: Scraping de dependências da página de grafos é impraticável.
-        // Seria necessário parsear manifestos ou usar API específica.
+        // Removidas seções que causavam mensagens de "sem dados":
+        // releases, codeFrequency, forksList
+        updateStats: {
+          apiCallsSuccessful: true,
+          scrapingSuccessful: {
+            releases: false, // Removido intencionalmente
+            forks: false, // Removido intencionalmente
+          },
+        },
       },
       error: null,
     };
@@ -379,7 +471,10 @@ async function updateGitHubDataCache() {
     githubDataCache.lastUpdated = cacheData.lastUpdated;
     githubDataCache.error = null;
 
-    console.log("Cache do GitHub atualizado com sucesso (API e Scraping).");
+    console.log("Cache do GitHub atualizado com sucesso (API otimizada).");
+    console.log(
+      "- Seções de releases, frequência de código e forks foram removidas para melhor UX."
+    );
   } catch (error) {
     console.error("Erro ao atualizar cache do GitHub:", error);
     githubDataCache.error = error.message;
@@ -434,8 +529,52 @@ app.get("/api/github-data", async (req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
-app.listen(PORT, async () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
-  await updateGitHubDataCache();
-  setInterval(updateGitHubDataCache, CACHE_UPDATE_INTERVAL_MS);
-});
+let server;
+let updateInterval;
+
+// Função de inicialização do servidor
+async function startServer() {
+  try {
+    server = app.listen(PORT, async () => {
+      console.log(`Servidor rodando em http://localhost:${PORT}`);
+      console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
+      await updateGitHubDataCache();
+      updateInterval = setInterval(
+        updateGitHubDataCache,
+        CACHE_UPDATE_INTERVAL_MS
+      );
+    });
+
+    // Graceful shutdown
+    const shutdown = async (signal) => {
+      console.log(`\nRecebido sinal ${signal}. Iniciando shutdown graceful...`);
+
+      if (updateInterval) {
+        clearInterval(updateInterval);
+        console.log("Interval de atualização cancelado.");
+      }
+
+      if (server) {
+        server.close(() => {
+          console.log("Servidor HTTP fechado.");
+          process.exit(0);
+        });
+
+        // Force close after 10 seconds
+        setTimeout(() => {
+          console.log("Forçando fechamento do servidor...");
+          process.exit(1);
+        }, 10000);
+      }
+    };
+
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+  } catch (error) {
+    console.error("Erro ao iniciar servidor:", error);
+    process.exit(1);
+  }
+}
+
+// Inicializa o servidor
+startServer();
