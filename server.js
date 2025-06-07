@@ -3,8 +3,9 @@ const fs = require("fs").promises;
 const path = require("path");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
-const morgan = require("morgan");
+const morgan = "morgan";
 const useragent = require("express-useragent");
+const cheerio = require("cheerio"); // Adicionado Cheerio
 require("dotenv").config();
 
 const PORT = process.env.PORT || 3000;
@@ -12,11 +13,12 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const VISITS_FILE = path.join(__dirname, "database", "visits.json");
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
+const GITHUB_BASE_URL = "https://github.com"; // Para scraping
 const REPO_OWNER = process.env.GITHUB_REPO_OWNER || "Kaikygr";
 const REPO_NAME = process.env.GITHUB_REPO_NAME || "omnizap";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_CACHE_FILE = path.join(__dirname, "database", "github-cache.json");
-const CACHE_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
+const CACHE_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1 hora
 
 let githubDataCache = {
   data: null,
@@ -38,7 +40,8 @@ const apiLimiter = rateLimit({
 app.use(apiLimiter);
 
 app.use(
-  morgan("combined", {
+  require("morgan")("combined", {
+    // Corrigido o require do morgan
     stream: {
       write: (message) => console.log(message.trim()),
     },
@@ -162,6 +165,80 @@ async function fetchGitHubAPI(endpoint) {
   return response.json();
 }
 
+// Nova função para buscar e raspar uma página HTML
+async function fetchAndScrapePage(urlPath, parserFunction) {
+  const url = `${GITHUB_BASE_URL}${urlPath}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status} for ${url}`);
+    }
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    return parserFunction($);
+  } catch (error) {
+    console.error(`Erro ao raspar ${url}:`, error);
+    throw error;
+  }
+}
+
+// Parser para a página de Releases
+function parseReleasesPage($) {
+  const releases = [];
+  // Seletor para cada item de release. Este seletor é um exemplo e PODE MUDAR.
+  // Inspecione a página de releases do GitHub para encontrar os seletores corretos.
+  $("div.repository-content div.Box > div.Box-row").each((i, el) => {
+    const $el = $(el);
+    const nameAndTag = $el.find("h2 a").first().text().trim(); // Pode conter nome e tag
+    const html_url = GITHUB_BASE_URL + $el.find("h2 a").first().attr("href");
+    const published_at_text = $el.find("relative-time").attr("datetime");
+    const body_html = $el.find(".markdown-body").html(); // Pega o HTML do corpo
+
+    // Tenta extrair nome e tag separadamente se possível, ou usa o combinado
+    let name = nameAndTag;
+    let tag_name = nameAndTag; // Fallback
+
+    // Exemplo de como poderia ser se o nome e a tag estivessem em elementos diferentes ou com estrutura previsível
+    // const name = $el.find('.release-title').text().trim();
+    // const tag_name = $el.find('.release-tag-name').text().trim();
+
+    if (nameAndTag && html_url && published_at_text) {
+      releases.push({
+        name: name,
+        tag_name: tag_name,
+        html_url: html_url,
+        published_at: published_at_text, // A data já está em formato ISO
+        body: body_html
+          ? body_html.trim().split("\n")[0].substring(0, 200) + "..."
+          : "Sem descrição.", // Pega o HTML e trunca
+      });
+    }
+  });
+  return releases.slice(0, 5); // Retorna as 5 mais recentes (a ordem na página geralmente é da mais nova para mais antiga)
+}
+
+// Parser para a página de Forks
+function parseForksPage($) {
+  const forks = [];
+  // Seletor para cada item de fork. Este seletor é um exemplo e PODE MUDAR.
+  // Inspecione a página de forks do GitHub (ex: /Kaikygr/omnizap/forks)
+  $("div[data-testid='list-view-item-container']").each((i, el) => {
+    const $el = $(el);
+    const full_name_anchor = $el.find("a[data-hovercard-type='repository']");
+    const full_name = full_name_anchor.text().trim().replace(/\s+/g, ""); // Remove espaços
+    const html_url = GITHUB_BASE_URL + full_name_anchor.attr("href");
+
+    if (full_name && html_url) {
+      forks.push({
+        full_name: full_name,
+        html_url: html_url,
+        // Outros dados como 'stargazers_count' são mais difíceis de pegar consistentemente via scraping aqui
+      });
+    }
+  });
+  return forks.slice(0, 5); // Retorna os 5 primeiros listados
+}
+
 async function readGithubCache() {
   try {
     const data = await fs.readFile(GITHUB_CACHE_FILE, "utf8");
@@ -204,9 +281,10 @@ async function updateGitHubDataCache() {
   }
 
   githubDataCache.isFetching = true;
-  console.log("Buscando dados atualizados do GitHub...");
+  console.log("Buscando dados atualizados do GitHub (API e Scraping)...");
 
   try {
+    // Dados que continuarão vindo da API por confiabilidade e disponibilidade
     const repoDetailsPromise = fetchGitHubAPI(
       `/repos/${REPO_OWNER}/${REPO_NAME}`
     );
@@ -226,6 +304,20 @@ async function updateGitHubDataCache() {
         return { name: "Não especificada" };
       throw err;
     });
+    const codeFrequencyPromise = fetchGitHubAPI(
+      // Mantido via API, scraping do gráfico não é viável
+      `/repos/${REPO_OWNER}/${REPO_NAME}/stats/code_frequency`
+    );
+
+    // Dados via Scraping
+    const releasesPromise = fetchAndScrapePage(
+      `/${REPO_OWNER}/${REPO_NAME}/releases`,
+      parseReleasesPage
+    );
+    const forksListPromise = fetchAndScrapePage(
+      `/${REPO_OWNER}/${REPO_NAME}/forks`,
+      parseForksPage
+    );
 
     const [repoDetails, commits, issues, languages, license] =
       await Promise.all([
@@ -235,6 +327,27 @@ async function updateGitHubDataCache() {
         languagesPromise,
         licensePromise,
       ]);
+
+    let codeFrequency = [];
+    try {
+      codeFrequency = await codeFrequencyPromise;
+    } catch (e) {
+      console.warn("Falha ao buscar frequência de código (API):", e.message);
+    }
+
+    let releases = [];
+    let forksList = [];
+
+    try {
+      releases = await releasesPromise;
+    } catch (e) {
+      console.warn("Falha ao raspar releases:", e.message);
+    }
+    try {
+      forksList = await forksListPromise;
+    } catch (e) {
+      console.warn("Falha ao raspar lista de forks:", e.message);
+    }
 
     let locCount = 0;
     if (languages && Object.keys(languages).length > 0) {
@@ -252,6 +365,11 @@ async function updateGitHubDataCache() {
         languages,
         licenseInfo: license.license || license,
         locCount,
+        releases, // Agora vem do scraping
+        codeFrequency, // Continua da API
+        forksList, // Agora vem do scraping
+        // dependencies: [], // Placeholder: Scraping de dependências da página de grafos é impraticável.
+        // Seria necessário parsear manifestos ou usar API específica.
       },
       error: null,
     };
@@ -261,7 +379,7 @@ async function updateGitHubDataCache() {
     githubDataCache.lastUpdated = cacheData.lastUpdated;
     githubDataCache.error = null;
 
-    console.log("Cache do GitHub atualizado com sucesso.");
+    console.log("Cache do GitHub atualizado com sucesso (API e Scraping).");
   } catch (error) {
     console.error("Erro ao atualizar cache do GitHub:", error);
     githubDataCache.error = error.message;

@@ -30,6 +30,7 @@
   },
   "homepage": "https://omnizap.shop",
   "dependencies": {
+    "cheerio": "^1.0.0",
     "compression": "^1.8.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
