@@ -231,10 +231,12 @@ function setText(elementId, text, defaultValue = "Não disponível") {
 function setLink(elementId, url) {
   const element = document.getElementById(elementId);
   const navElement = document.getElementById(elementId + "Nav");
+  const headerElement = document.getElementById("headerGithubLink");
   if (element && url) {
     element.href = url;
     element.classList.remove("hidden");
     if (navElement) navElement.href = url;
+    if (headerElement) headerElement.href = url;
   }
 }
 
@@ -364,6 +366,72 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   showLoadingBar();
 
+  // Mobile Sidebar Menu Toggle
+  const mobileMenuButton = document.getElementById("mobileMenuButton");
+  const mobileSidebarMenu = document.getElementById("mobileSidebarMenu");
+  const mobileSidebarOverlay = document.getElementById("mobileSidebarOverlay");
+  const closeSidebarButton = document.getElementById("closeSidebarButton");
+
+  function openSidebar() {
+    mobileSidebarMenu.classList.remove("-translate-x-full");
+    mobileSidebarOverlay.classList.remove("hidden");
+    document.body.style.overflow = "hidden"; // Prevent body scroll when sidebar is open
+    mobileMenuButton.setAttribute("aria-expanded", "true");
+  }
+
+  function closeSidebar() {
+    mobileSidebarMenu.classList.add("-translate-x-full");
+    mobileSidebarOverlay.classList.add("hidden");
+    document.body.style.overflow = ""; // Restore body scroll
+    mobileMenuButton.setAttribute("aria-expanded", "false");
+  }
+
+  if (mobileMenuButton && mobileSidebarMenu && mobileSidebarOverlay) {
+    // Open sidebar when hamburger button is clicked
+    mobileMenuButton.addEventListener("click", openSidebar);
+
+    // Close sidebar when close button is clicked
+    if (closeSidebarButton) {
+      closeSidebarButton.addEventListener("click", closeSidebar);
+    }
+
+    // Close sidebar when overlay is clicked
+    mobileSidebarOverlay.addEventListener("click", closeSidebar);
+
+    // Close sidebar when a navigation link is clicked
+    mobileSidebarMenu.querySelectorAll(".sidebar-link").forEach((link) => {
+      link.addEventListener("click", () => {
+        closeSidebar();
+      });
+    });
+
+    // Close sidebar when Escape key is pressed
+    document.addEventListener("keydown", (event) => {
+      if (
+        event.key === "Escape" &&
+        !mobileSidebarMenu.classList.contains("-translate-x-full")
+      ) {
+        closeSidebar();
+      }
+    });
+
+    // Handle window resize - close sidebar if screen becomes desktop size
+    window.addEventListener("resize", () => {
+      if (window.innerWidth >= 768) {
+        // md breakpoint
+        closeSidebar();
+      }
+    });
+  }
+
+  // Update sidebar GitHub link when data is loaded
+  function updateSidebarGithubLink(url) {
+    const sidebarGithubLink = document.getElementById("sidebarGithubLink");
+    if (sidebarGithubLink && url) {
+      sidebarGithubLink.href = url;
+    }
+  }
+
   try {
     const [serverData, visitsData] = await Promise.all([
       fetchServerData(),
@@ -372,6 +440,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (serverData) {
       updateUI(serverData);
+      // Update sidebar GitHub link
+      if (serverData.repoDetails?.html_url) {
+        updateSidebarGithubLink(serverData.repoDetails.html_url);
+      }
     } else {
       // Handle case where serverData is null/undefined from fetchServerData (already throws, but as a fallback)
       displayGlobalError(
@@ -400,25 +472,4 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
   completeLoadingBar();
-
-  // Mobile Menu Toggle
-  const mobileMenuButton = document.getElementById("mobileMenuButton");
-  const mobileNavMenu = document.getElementById("mobileNavMenu");
-
-  if (mobileMenuButton && mobileNavMenu) {
-    mobileMenuButton.addEventListener("click", () => {
-      const isExpanded =
-        mobileMenuButton.getAttribute("aria-expanded") === "true" || false;
-      mobileMenuButton.setAttribute("aria-expanded", !isExpanded);
-      mobileNavMenu.classList.toggle("hidden");
-    });
-
-    // Optional: Close menu when a link is clicked (for single-page navigation)
-    mobileNavMenu.querySelectorAll('a[href^="#"]').forEach((link) => {
-      link.addEventListener("click", () => {
-        mobileNavMenu.classList.add("hidden");
-        mobileMenuButton.setAttribute("aria-expanded", "false");
-      });
-    });
-  }
 });
