@@ -8,22 +8,29 @@ async function loadVisitStats() {
     loadingIndicator.classList.remove("hidden");
     statsContent.classList.add("hidden");
 
-    const response = await fetch("/api/visits/stats");
-    const result = await response.json();
+    const response = await fetch("/api/visit-stats");
 
-    if (!result.success) {
-      throw new Error(result.error || "Erro ao carregar estatísticas");
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const stats = result.data;
+    const result = await response.json();
+
+    // Verificar se há erro na resposta
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    // Para compatibilidade, aceitar tanto result.data quanto result diretamente
+    const stats = result.data || result;
 
     // Atualizar resumo geral
-    updateSummary(stats.summary);
+    updateSummary(stats.summary || {});
 
     // Atualizar gráficos e listas
-    updateDeviceCharts(stats.devices);
-    updateTimeCharts(stats.timeAnalysis);
-    updateTrends(stats.trends);
+    updateDeviceCharts(stats.devices || {});
+    updateTimeCharts(stats.timeAnalysis || {});
+    updateTrends(stats.trends || {});
 
     loadingIndicator.classList.add("hidden");
     statsContent.classList.remove("hidden");
@@ -42,25 +49,33 @@ async function loadVisitStats() {
 }
 
 function updateSummary(summary) {
-  document.getElementById("totalVisits").textContent =
-    summary.totalVisits.toLocaleString("pt-BR");
-  document.getElementById("uniqueVisitors").textContent =
-    summary.uniqueVisitors.toLocaleString("pt-BR");
+  document.getElementById("totalVisits").textContent = (
+    summary.totalVisits || 0
+  ).toLocaleString("pt-BR");
+  document.getElementById("uniqueVisitors").textContent = (
+    summary.uniqueVisitors || 0
+  ).toLocaleString("pt-BR");
 
   if (summary.firstVisit) {
     document.getElementById("firstVisit").textContent = new Date(
       summary.firstVisit
-    ).toLocaleDateString("pt-BR");
+    ).toLocaleString("pt-BR");
+  } else {
+    document.getElementById("firstVisit").textContent = "Nenhuma visita";
   }
 
   if (summary.lastVisit) {
     document.getElementById("lastVisit").textContent = new Date(
       summary.lastVisit
-    ).toLocaleDateString("pt-BR");
+    ).toLocaleString("pt-BR");
+  } else {
+    document.getElementById("lastVisit").textContent = "Nenhuma visita";
   }
 }
 
 function updateDeviceCharts(deviceData) {
+  const deviceTypes = deviceData.deviceTypes || {};
+
   // Gráfico de tipos de dispositivo
   const deviceCtx = document.getElementById("deviceChart").getContext("2d");
 
@@ -68,22 +83,24 @@ function updateDeviceCharts(deviceData) {
     charts.device.destroy();
   }
 
+  const deviceLabels = Object.keys(deviceTypes).map((key) => {
+    const labels = {
+      mobile: "Mobile",
+      desktop: "Desktop",
+      tablet: "Tablet",
+      bot: "Bot",
+      unknown: "Desconhecido",
+    };
+    return labels[key] || key;
+  });
+
   charts.device = new Chart(deviceCtx, {
     type: "doughnut",
     data: {
-      labels: Object.keys(deviceData.deviceTypes).map((key) => {
-        const labels = {
-          mobile: "Mobile",
-          desktop: "Desktop",
-          tablet: "Tablet",
-          bot: "Bot",
-          unknown: "Desconhecido",
-        };
-        return labels[key] || key;
-      }),
+      labels: deviceLabels,
       datasets: [
         {
-          data: Object.values(deviceData.deviceTypes),
+          data: Object.values(deviceTypes),
           backgroundColor: [
             "#3B82F6", // blue
             "#10B981", // emerald
@@ -105,10 +122,17 @@ function updateDeviceCharts(deviceData) {
   });
 
   // Lista de navegadores
+  const browsers = deviceData.browsers || {};
   const browserList = document.getElementById("browserList");
   browserList.innerHTML = "";
 
-  Object.entries(deviceData.browsers).forEach(([browser, count]) => {
+  if (Object.keys(browsers).length === 0) {
+    browserList.innerHTML =
+      '<p class="text-gray-500 italic">Nenhum dado de navegador disponível</p>';
+    return;
+  }
+
+  Object.entries(browsers).forEach(([browser, count]) => {
     const item = document.createElement("div");
     item.className =
       "flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-600 rounded";
@@ -121,6 +145,9 @@ function updateDeviceCharts(deviceData) {
 }
 
 function updateTimeCharts(timeData) {
+  const hourly = timeData.hourly || {};
+  const weekdays = timeData.weekdays || {};
+
   // Gráfico de acessos por hora
   const hourlyCtx = document.getElementById("hourlyChart").getContext("2d");
 
@@ -131,11 +158,11 @@ function updateTimeCharts(timeData) {
   charts.hourly = new Chart(hourlyCtx, {
     type: "line",
     data: {
-      labels: Object.keys(timeData.hourly),
+      labels: Object.keys(hourly),
       datasets: [
         {
           label: "Acessos",
-          data: Object.values(timeData.hourly),
+          data: Object.values(hourly),
           borderColor: "#3B82F6",
           backgroundColor: "#3B82F620",
           tension: 0.4,
@@ -165,11 +192,11 @@ function updateTimeCharts(timeData) {
   charts.weekday = new Chart(weekdayCtx, {
     type: "bar",
     data: {
-      labels: Object.keys(timeData.weekdays),
+      labels: Object.keys(weekdays),
       datasets: [
         {
           label: "Acessos",
-          data: Object.values(timeData.weekdays),
+          data: Object.values(weekdays),
           backgroundColor: "#10B981",
         },
       ],
@@ -189,23 +216,27 @@ function updateTimeCharts(timeData) {
 }
 
 function updateTrends(trendsData) {
+  const last24h = trendsData.last24hours || {};
+  const last7d = trendsData.last7days || {};
+  const last30d = trendsData.last30days || {};
+
   // Últimas 24h
   document.getElementById("visits24h").textContent =
-    `${trendsData.last24hours.totalVisits} visitas`;
+    `${last24h.totalVisits || 0} visitas`;
   document.getElementById("unique24h").textContent =
-    `${trendsData.last24hours.uniqueVisitors} únicos`;
+    `${last24h.uniqueVisitors || 0} únicos`;
 
   // Últimos 7 dias
   document.getElementById("visits7d").textContent =
-    `${trendsData.last7days.totalVisits} visitas`;
+    `${last7d.totalVisits || 0} visitas`;
   document.getElementById("unique7d").textContent =
-    `${trendsData.last7days.uniqueVisitors} únicos`;
+    `${last7d.uniqueVisitors || 0} únicos`;
 
   // Últimos 30 dias
   document.getElementById("visits30d").textContent =
-    `${trendsData.last30days.totalVisits} visitas`;
+    `${last30d.totalVisits || 0} visitas`;
   document.getElementById("unique30d").textContent =
-    `${trendsData.last30days.uniqueVisitors} únicos`;
+    `${last30d.uniqueVisitors || 0} únicos`;
 }
 
 // Event listeners

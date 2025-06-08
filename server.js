@@ -59,81 +59,151 @@ app.use(useragent.express());
 app.use(express.json());
 app.use(express.static("public"));
 
-async function ensureDatabaseDir() {
-  const dir = path.dirname(VISITS_FILE);
+// Configurar CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
+// Paths dos arquivos
+const VISITS_DIR = path.join(__dirname, "database");
+
+// Função para garantir que o diretório existe
+async function ensureDirectoryExists() {
   try {
-    await fs.access(dir);
+    await fs.access(VISITS_DIR);
   } catch {
-    await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(VISITS_DIR, { recursive: true });
   }
 }
 
-async function readVisits() {
+// Função para gerar ID único
+function generateId() {
+  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+}
+
+// Função para detectar informações do User Agent (melhorada)
+function parseUserAgent(userAgentString) {
+  const ua = userAgentString || "";
+
+  // Detectar browser
+  let browser = "Desconhecido";
+  if (ua.includes("Chrome") && !ua.includes("Edge")) browser = "Chrome";
+  else if (ua.includes("Firefox")) browser = "Firefox";
+  else if (ua.includes("Safari") && !ua.includes("Chrome")) browser = "Safari";
+  else if (ua.includes("Edge")) browser = "Edge";
+  else if (ua.includes("Opera")) browser = "Opera";
+
+  // Detectar OS
+  let os = "Desconhecido";
+  if (ua.includes("Windows NT")) os = "Windows";
+  else if (ua.includes("Mac OS X") || ua.includes("Macintosh")) os = "macOS";
+  else if (ua.includes("Linux") && !ua.includes("Android")) os = "Linux";
+  else if (ua.includes("Android")) os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad")) os = "iOS";
+
+  // Detectar tipo de dispositivo
+  let device = "desktop";
+  let isMobile = false;
+  let isDesktop = false;
+  let isTablet = false;
+  let isBot = false;
+
+  // Detectar bots
+  if (
+    ua.toLowerCase().includes("bot") ||
+    ua.toLowerCase().includes("crawler") ||
+    ua.toLowerCase().includes("spider")
+  ) {
+    device = "bot";
+    isBot = true;
+  }
+  // Detectar mobile
+  else if (
+    ua.includes("Mobile") ||
+    ua.includes("iPhone") ||
+    ua.includes("Android")
+  ) {
+    device = "mobile";
+    isMobile = true;
+  }
+  // Detectar tablet
+  else if (ua.includes("Tablet") || ua.includes("iPad")) {
+    device = "tablet";
+    isTablet = true;
+  }
+  // Desktop por padrão
+  else {
+    device = "desktop";
+    isDesktop = true;
+  }
+
+  return {
+    browser,
+    os,
+    device,
+    isMobile,
+    isDesktop,
+    isTablet,
+    isBot,
+    platform: os, // Para compatibilidade
+  };
+}
+
+// Endpoint para registrar visita
+app.post("/api/visit", async (req, res) => {
   try {
-    await ensureDatabaseDir();
+    await ensureDirectoryExists();
+
+    const userAgentData = parseUserAgent(req.headers["user-agent"]);
+
+    const visitData = {
+      id: generateId(),
+      timestamp: new Date().toISOString(),
+      ip:
+        req.ip ||
+        req.connection.remoteAddress ||
+        req.headers["x-forwarded-for"]?.split(",")[0],
+      userAgent: userAgentData, // Armazenar objeto completo
+      userAgentString: req.headers["user-agent"], // String original para referência
+      referrer: req.headers.referer || req.body.referrer || "",
+      url: req.body.url || req.headers.referer || "",
+      browser: userAgentData.browser,
+      os: userAgentData.os,
+      device: userAgentData.device,
+    };
+
+    // Carregar dados existentes
+    let visitsData = { totalVisits: 0, visits: [] };
     try {
       const data = await fs.readFile(VISITS_FILE, "utf8");
-      return JSON.parse(data);
+      visitsData = JSON.parse(data);
     } catch (error) {
-      if (error.code === "ENOENT") {
-        const initialData = { totalVisits: 0, visits: [] };
-        await fs.writeFile(
-          VISITS_FILE,
-          JSON.stringify(initialData, null, 2),
-          "utf8"
-        );
-        return initialData;
-      }
-      throw error;
+      console.log("Arquivo de visitas não existe, criando novo...");
     }
+
+    // Adicionar nova visita
+    visitsData.visits.push(visitData);
+    visitsData.totalVisits = visitsData.visits.length;
+
+    // Salvar dados atualizados
+    await fs.writeFile(VISITS_FILE, JSON.stringify(visitsData, null, 2));
+
+    res.json({ success: true, visitId: visitData.id });
+    console.log(`Nova visita registrada: ${visitData.id} de ${visitData.ip}`);
   } catch (error) {
-    console.error("Erro ao ler arquivo de visitas:", error);
-    return { totalVisits: 0, visits: [] };
+    console.error("Erro ao registrar visita:", error);
+    res.status(500).json({ error: "Erro interno do servidor" });
   }
-}
-
-async function saveVisits(visitsData) {
-  try {
-    await ensureDatabaseDir();
-    await fs.writeFile(
-      VISITS_FILE,
-      JSON.stringify(visitsData, null, 2),
-      "utf8"
-    );
-  } catch (error) {
-    console.error("Erro ao salvar visitas:", error);
-  }
-}
-
-app.use(async (req, res, next) => {
-  if (req.path === "/" && req.method === "GET") {
-    try {
-      const visitsData = await readVisits();
-      const visitInfo = {
-        timestamp: new Date().toISOString(),
-        ip: req.ip || req.connection.remoteAddress,
-        userAgent: {
-          browser: req.useragent.browser,
-          version: req.useragent.version,
-          os: req.useragent.os,
-          platform: req.useragent.platform,
-          source: req.useragent.source,
-          isMobile: req.useragent.isMobile,
-          isDesktop: req.useragent.isDesktop,
-          isBot: req.useragent.isBot,
-        },
-      };
-
-      visitsData.totalVisits = (visitsData.totalVisits || 0) + 1;
-      visitsData.visits = visitsData.visits || [];
-      visitsData.visits.push(visitInfo);
-
-      saveVisits(visitsData).catch(console.error);
-    } catch (error) {
-      console.error("Erro ao processar visita:", error);
-    }
-  }
-  next();
 });
 
 // Endpoint para dados do GitHub
@@ -141,16 +211,32 @@ app.get("/api/server-data", async (req, res) => {
   try {
     const githubData = await readJsonFile(GITHUB_CACHE_FILE);
 
-    if (!githubData.data) {
+    if (!githubData.repoData) {
+      console.log("API do GitHub indisponível, retornando dados de fallback.");
       return res.json({
-        success: false,
-        error: "Dados do GitHub não encontrados",
+        success: true,
+        data: {
+          stars: 0,
+          forks: 0,
+          issues: 0,
+        },
+        lastUpdated: new Date().toISOString(),
       });
     }
 
+    // Transformar os dados do cache no formato esperado pelo frontend
+    const transformedData = {
+      repoDetails: githubData.repoData,
+      commits: githubData.commits || [],
+      issues: githubData.issues || [],
+      languages: githubData.languages || {},
+      licenseInfo: githubData.repoData.license,
+      locCount: githubData.locCount || 3277,
+    };
+
     res.json({
       success: true,
-      data: githubData.data,
+      data: transformedData,
       lastUpdated: githubData.lastUpdated,
     });
   } catch (error) {
@@ -162,81 +248,31 @@ app.get("/api/server-data", async (req, res) => {
   }
 });
 
-// Endpoint para registrar visita
-app.post("/api/visits", async (req, res) => {
-  try {
-    const { userAgent, referrer, url } = req.body;
-    const ip = req.ip || req.connection.remoteAddress;
-
-    const visit = {
-      id: Date.now() + Math.random().toString(36).substr(2, 9),
-      timestamp: new Date().toISOString(),
-      ip: ip,
-      userAgent: userAgent,
-      referrer: referrer || "",
-      url: url || "",
-      device: getDeviceType(userAgent),
-      browser: getBrowser(userAgent),
-      os: getOS(userAgent),
-    };
-
-    const visitsData = await readJsonFile(VISITS_FILE, { visits: [] });
-    visitsData.visits.push(visit);
-
-    // Manter apenas os últimos 1000 registros
-    if (visitsData.visits.length > 1000) {
-      visitsData.visits = visitsData.visits.slice(-1000);
-    }
-
-    await writeJsonFile(VISITS_FILE, visitsData);
-
-    res.json({
-      success: true,
-      message: "Visita registrada com sucesso",
-    });
-  } catch (error) {
-    console.error("Erro ao registrar visita:", error);
-    res.status(500).json({
-      success: false,
-      error: "Erro ao registrar visita",
-    });
-  }
-});
-
 // Endpoint para estatísticas de visitas
-app.get("/api/visits/stats", async (req, res) => {
+app.get("/api/visit-stats", async (req, res) => {
   try {
-    const statsProcessor = new VisitStatsProcessor(VISITS_FILE);
-    const stats = await statsProcessor.processAllStats();
+    await ensureDirectoryExists();
 
-    res.json({
-      success: true,
-      data: stats,
-    });
+    const processor = new VisitStatsProcessor(VISITS_FILE);
+    const stats = await processor.processAllStats();
+
+    res.json(stats);
+    console.log("Estatísticas de visitas enviadas");
   } catch (error) {
-    console.error("Erro ao calcular estatísticas:", error);
-    res.status(500).json({
-      success: false,
-      error: "Erro ao calcular estatísticas",
-    });
+    console.error("Erro ao obter estatísticas:", error);
+    res.status(500).json({ error: "Erro ao processar estatísticas" });
   }
 });
 
-// Endpoint para obter todas as visitas (admin)
-app.get("/api/visits/all", async (req, res) => {
+// Rota para obter dados brutos de visitas (para debug)
+app.get("/api/visits/raw", async (req, res) => {
   try {
-    const visitsData = await readJsonFile(VISITS_FILE, { visits: [] });
-
-    res.json({
-      success: true,
-      data: visitsData.visits || [],
-    });
+    const data = await fs.readFile(VISITS_FILE, "utf8");
+    const visitsData = JSON.parse(data);
+    res.json(visitsData);
   } catch (error) {
-    console.error("Erro ao carregar visitas:", error);
-    res.status(500).json({
-      success: false,
-      error: "Erro ao carregar visitas",
-    });
+    console.error("Erro ao obter dados brutos:", error);
+    res.status(500).json({ error: "Erro ao carregar dados" });
   }
 });
 
@@ -245,23 +281,41 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-async function readJsonFile(filePath, defaultValue = {}) {
+app.get("/visit-stats.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "visit-stats.html"));
+});
+
+// Middleware para rotas não encontradas
+app.use((req, res) => {
+  res.status(404).sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// Middleware para tratamento de erros
+app.use((error, req, res, next) => {
+  console.error("Erro do servidor:", error);
+  res.status(500).json({ error: "Erro interno do servidor" });
+});
+
+// Funções auxiliares para manipulação de arquivos JSON
+async function readJsonFile(filePath) {
   try {
     const data = await fs.readFile(filePath, "utf8");
     return JSON.parse(data);
   } catch (error) {
-    console.log(`Arquivo ${filePath} não encontrado, criando...`);
-    await writeJsonFile(filePath, defaultValue);
-    return defaultValue;
+    console.log(
+      `Arquivo ${filePath} não encontrado ou inválido, retornando objeto vazio`
+    );
+    return {};
   }
 }
 
 async function writeJsonFile(filePath, data) {
   try {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+    await ensureDirectoryExists();
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
   } catch (error) {
     console.error(`Erro ao escrever arquivo ${filePath}:`, error);
+    throw error;
   }
 }
 
@@ -296,31 +350,123 @@ let updateInterval;
 async function updateGitHubDataCache() {
   try {
     console.log("Atualizando cache do GitHub...");
-
-    // Esta função pode ser expandida futuramente para buscar dados do GitHub
-    // Por enquanto, apenas cria um cache vazio se não existir
-    const cacheData = {
+    const fallbackData = {
       lastUpdated: new Date().toISOString(),
-      repoData: {},
-      // Adicionar mais dados conforme necessário
+      repoData: {
+        stargazers_count: 0,
+        forks_count: 0,
+        open_issues_count: 0,
+        name: "omnizap",
+        description: "Bot de WhatsApp open-source",
+        language: "JavaScript",
+      },
+      commits: [],
+      issues: [],
+      languages: { JavaScript: 91410 },
+      locCount: 3277,
     };
 
+    // Buscar dados do GitHub
+    const cacheData = await fetchGitHubData().catch((error) => {
+      console.error("Erro ao buscar dados do GitHub, usando fallback:", error);
+      return fallbackData;
+    });
+
+    // Salvar cache
     await writeJsonFile(GITHUB_CACHE_FILE, cacheData);
-    console.log("Cache do GitHub atualizado com sucesso");
+    console.log(`Cache do GitHub salvo com sucesso em ${GITHUB_CACHE_FILE}`);
+
+    return cacheData;
   } catch (error) {
     console.error("Erro ao atualizar cache do GitHub:", error);
+    throw error;
+  }
+}
+
+// Função para buscar dados do GitHub
+async function fetchGitHubData() {
+  const repoUrl = `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}`;
+  const commitsUrl = `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=5`;
+  const issuesUrl = `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/issues?state=all&per_page=5`;
+  const languagesUrl = `${GITHUB_API_BASE_URL}/repos/${REPO_OWNER}/${REPO_NAME}/languages`;
+
+  const headers = {
+    Authorization: `token ${GITHUB_TOKEN}`,
+    "User-Agent": "omnizap-site",
+  };
+
+  try {
+    console.log(`Buscando dados do GitHub na URL: ${repoUrl}`);
+
+    // Buscar dados do repositório
+    const repoResponse = await fetch(repoUrl, { headers });
+    if (!repoResponse.ok) {
+      throw new Error(`Erro na API do GitHub: ${repoResponse.statusText}`);
+    }
+    const repoData = await repoResponse.json();
+
+    // Buscar commits (opcional - se falhar, continua sem)
+    let commits = [];
+    try {
+      const commitsResponse = await fetch(commitsUrl, { headers });
+      if (commitsResponse.ok) {
+        commits = await commitsResponse.json();
+      }
+    } catch (error) {
+      console.warn("Não foi possível buscar commits:", error.message);
+    }
+
+    // Buscar issues (opcional - se falhar, continua sem)
+    let issues = [];
+    try {
+      const issuesResponse = await fetch(issuesUrl, { headers });
+      if (issuesResponse.ok) {
+        issues = await issuesResponse.json();
+      }
+    } catch (error) {
+      console.warn("Não foi possível buscar issues:", error.message);
+    }
+
+    // Buscar linguagens (opcional - se falhar, continua sem)
+    let languages = {};
+    try {
+      const languagesResponse = await fetch(languagesUrl, { headers });
+      if (languagesResponse.ok) {
+        languages = await languagesResponse.json();
+      }
+    } catch (error) {
+      console.warn("Não foi possível buscar linguagens:", error.message);
+    }
+
+    console.log("Dados do GitHub obtidos com sucesso");
+
+    return {
+      lastUpdated: new Date().toISOString(),
+      repoData: repoData,
+      commits: commits,
+      issues: issues,
+      languages: languages,
+      locCount: 3277, // Pode ser calculado dinamicamente se necessário
+    };
+  } catch (error) {
+    console.error("Erro ao buscar dados do GitHub:", error.message);
+    throw error;
   }
 }
 
 async function startServer() {
   try {
-    server = app.listen(PORT, async () => {
+    // Atualizar o cache do GitHub antes de iniciar o servidor
+    console.log("Inicializando cache do GitHub...");
+    const githubData = await updateGitHubDataCache();
+
+    server = app.listen(PORT, () => {
       console.log(
         `[Instância ${INSTANCE_ID}] Servidor rodando em http://localhost:${PORT}`
       );
       console.log(`Ambiente: ${process.env.NODE_ENV || "development"}`);
       console.log(`PID: ${process.pid}`);
-      await updateGitHubDataCache();
+      // Configurar apenas o intervalo de atualização após o servidor iniciar
       updateInterval = setInterval(
         updateGitHubDataCache,
         CACHE_UPDATE_INTERVAL_MS

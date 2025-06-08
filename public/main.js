@@ -460,9 +460,10 @@ function updateIssuesList(issues) {
 function updateAdditionalStats(data) {
   setText("statsRecentCommits", formatNumber(data.commits?.length || 2));
 
-  const totalIssues = data.issues?.length || 1;
-  const openIssues =
-    data.issues?.filter((issue) => issue.state === "open").length || 0;
+  const totalIssues = Array.isArray(data.issues) ? data.issues.length : 0;
+  const openIssues = Array.isArray(data.issues)
+    ? data.issues.filter((issue) => issue.state === "open").length
+    : 0;
   const closedIssues = totalIssues - openIssues;
 
   setText("statsRecentIssues", formatNumber(totalIssues));
@@ -518,33 +519,65 @@ async function recordVisit() {
   }
 }
 
+// Função para carregar estatísticas de visitas
 async function loadVisitStats() {
   try {
-    const data = await fetchWithCache("/api/visits/stats");
-    if (data.success) {
-      updateVisitStats(data.data);
+    const response = await fetch("/api/visit-stats");
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+    const data = await response.json();
+
+    // Verificar se há erro na resposta
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    // Para compatibilidade, aceitar tanto data.data quanto data diretamente
+    const stats = data.data || data;
+
+    // Atualizar elementos da página principal usando a estrutura correta
+    if (stats.summary) {
+      updateElementTextById(
+        "visitsTotal",
+        (stats.summary.totalVisits || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visitsUnique",
+        (stats.summary.uniqueVisitors || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visitCount",
+        (stats.summary.totalVisits || 0).toLocaleString("pt-BR")
+      );
+    }
+
+    if (stats.trends) {
+      updateElementTextById(
+        "visits24h",
+        (stats.trends.last24hours?.totalVisits || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visits7d",
+        (stats.trends.last7days?.totalVisits || 0).toLocaleString("pt-BR")
+      );
+    }
+
+    // Atualizar estatísticas detalhadas se disponíveis
+    if (stats.devices) {
+      updateVisitStats(stats);
+    }
+
+    return stats;
   } catch (error) {
     console.error("Erro ao carregar estatísticas de visitas:", error);
-    // Usar dados padrão se a API falhar
-    updateVisitStats({
-      summary: {
-        totalVisits: 1,
-        uniqueVisitors: 1,
-      },
-      trends: {
-        last24hours: { totalVisits: 1 },
-        last7days: { totalVisits: 1 },
-      },
-      devices: {
-        deviceTypes: { Desktop: 1 },
-        browsers: { Chrome: 1 },
-        operatingSystems: { Windows: 1 },
-      },
-      timeAnalysis: {
-        hourly: { "12:00": 1 },
-      },
-    });
+    // Valores padrão em caso de erro
+    updateElementTextById("visitsTotal", "0");
+    updateElementTextById("visitsUnique", "0");
+    updateElementTextById("visits24h", "0");
+    updateElementTextById("visits7d", "0");
+    updateElementTextById("visitCount", "0");
+    return null;
   }
 }
 
@@ -739,3 +772,628 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+
+// Configurações e constantes
+const GITHUB_API_BASE = "https://api.github.com";
+const REPO_OWNER = "kaikygr";
+const REPO_NAME = "omnizap";
+const REPO_URL = `${GITHUB_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}`;
+
+// Função utilitária para atualizar texto de elemento por ID
+function updateElementTextById(elementId, text) {
+  const element = document.getElementById(elementId);
+  if (element) {
+    element.textContent = text;
+    element.classList.remove("loading-placeholder");
+  }
+}
+
+// Função utilitária para atualizar HTML de elemento por ID
+function updateElementHtmlById(elementId, html) {
+  const element = document.getElementById(elementId);
+  if (element) {
+    element.innerHTML = html;
+    element.classList.remove("loading-placeholder");
+  }
+}
+
+// Função utilitária para formatar números
+function formatNumber(number) {
+  if (number >= 1000000) {
+    return (number / 1000000).toFixed(1) + "M";
+  } else if (number >= 1000) {
+    return (number / 1000).toFixed(1) + "K";
+  }
+  return number.toString();
+}
+
+// Função utilitária para formatar bytes
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+// Função utilitária para formatar datas
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("pt-BR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+// Função utilitária para formatar data e hora
+function formatDateTime(dateString) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("pt-BR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// Função utilitária para tempo relativo
+function getTimeAgo(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInSeconds = Math.floor((now - date) / 1000);
+
+  if (diffInSeconds < 60) return "agora mesmo";
+  if (diffInSeconds < 3600)
+    return `${Math.floor(diffInSeconds / 60)} min atrás`;
+  if (diffInSeconds < 86400)
+    return `${Math.floor(diffInSeconds / 3600)} h atrás`;
+  if (diffInSeconds < 2592000)
+    return `${Math.floor(diffInSeconds / 86400)} dias atrás`;
+
+  return formatDate(dateString);
+}
+
+// Função para mostrar mensagem de erro
+function showError(message, containerId = "errorMessageGlobal") {
+  const errorContainer = document.getElementById(containerId);
+  if (errorContainer) {
+    errorContainer.innerHTML = `
+      <div class="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-600 text-red-700 dark:text-red-300 px-4 py-3 rounded relative">
+        <strong class="font-bold">Erro:</strong>
+        <span class="block sm:inline"> ${message}</span>
+      </div>
+    `;
+    errorContainer.classList.remove("hidden");
+    setTimeout(() => {
+      errorContainer.classList.add("hidden");
+    }, 5000);
+  }
+}
+
+// Função para fazer requisições à API
+async function fetchWithRetry(url, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+      console.warn(`Tentativa ${i + 1} falhou, tentando novamente...`, error);
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+}
+
+// Função para registrar visita
+async function recordVisit() {
+  try {
+    await fetch("/api/visit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: window.location.href,
+        referrer: document.referrer,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    console.warn("Erro ao registrar visita:", error);
+  }
+}
+
+// Função para carregar dados do repositório
+async function loadRepositoryData() {
+  try {
+    const data = await fetchWithRetry(REPO_URL);
+
+    // Atualizar informações básicas
+    updateElementTextById("projectName", data.name || "N/A");
+    updateElementTextById(
+      "projectDescription",
+      data.description || "Sem descrição disponível"
+    );
+    updateElementTextById("projectLanguage", data.language || "N/A");
+    updateElementTextById(
+      "stargazersCount",
+      formatNumber(data.stargazers_count || 0)
+    );
+    updateElementTextById("forksCount", formatNumber(data.forks_count || 0));
+    updateElementTextById(
+      "watchersCount",
+      formatNumber(data.watchers_count || 0)
+    );
+    updateElementTextById(
+      "openIssuesCount",
+      formatNumber(data.open_issues_count || 0)
+    );
+    updateElementTextById("repoSize", formatBytes((data.size || 0) * 1024));
+    updateElementTextById("licenseInfo", data.license?.name || "Sem licença");
+
+    // Atualizar datas
+    updateElementTextById("createdAt", formatDate(data.created_at));
+    updateElementTextById("lastUpdated", formatDate(data.updated_at));
+    updateElementTextById("pushedAt", formatDate(data.pushed_at));
+
+    // Atualizar links
+    const projectLink = document.getElementById("projectHtmlUrl");
+    const headerGithubLink = document.getElementById("headerGithubLink");
+    const sidebarGithubLink = document.getElementById("sidebarGithubLink");
+
+    if (projectLink) projectLink.href = data.html_url;
+    if (headerGithubLink) headerGithubLink.href = data.html_url;
+    if (sidebarGithubLink) sidebarGithubLink.href = data.html_url;
+
+    // Atualizar informações avançadas
+    updateElementTextById("visibility", data.private ? "Privado" : "Público");
+    updateElementTextById("defaultBranch", data.default_branch || "main");
+    updateElementTextById("allowForking", data.allow_forking ? "Sim" : "Não");
+    updateElementTextById("isTemplate", data.is_template ? "Sim" : "Não");
+    updateElementTextById(
+      "hasIssues",
+      data.has_issues ? "Habilitado" : "Desabilitado"
+    );
+    updateElementTextById(
+      "hasProjects",
+      data.has_projects ? "Habilitado" : "Desabilitado"
+    );
+    updateElementTextById(
+      "hasWiki",
+      data.has_wiki ? "Habilitado" : "Desabilitado"
+    );
+    updateElementTextById(
+      "hasDiscussions",
+      data.has_discussions ? "Habilitado" : "Desabilitado"
+    );
+    updateElementTextById(
+      "networkCount",
+      formatNumber(data.network_count || 0)
+    );
+    updateElementTextById(
+      "subscribersCount",
+      formatNumber(data.subscribers_count || 0)
+    );
+
+    // Carregar informações do desenvolvedor
+    await loadDeveloperInfo(data.owner);
+
+    console.log("Dados do repositório carregados com sucesso");
+  } catch (error) {
+    console.error("Erro ao carregar dados do repositório:", error);
+    showError("Não foi possível carregar as informações do repositório.");
+  }
+}
+
+// Função para carregar informações do desenvolvedor
+async function loadDeveloperInfo(owner) {
+  try {
+    updateElementTextById("developerName", owner.login || "N/A");
+    updateElementTextById("developerType", owner.type || "N/A");
+    updateElementTextById("developerId", owner.id?.toString() || "N/A");
+
+    const avatarImg = document.getElementById("developerAvatar");
+    const profileLink = document.getElementById("developerProfile");
+
+    if (avatarImg && owner.avatar_url) {
+      avatarImg.src = owner.avatar_url;
+      avatarImg.alt = `Avatar de ${owner.login}`;
+    }
+
+    if (profileLink && owner.html_url) {
+      profileLink.href = owner.html_url;
+    }
+  } catch (error) {
+    console.error("Erro ao carregar informações do desenvolvedor:", error);
+  }
+}
+
+// Função para carregar linguagens do repositório
+async function loadLanguages() {
+  try {
+    const languages = await fetchWithRetry(`${REPO_URL}/languages`);
+    const languagesContainer = document.getElementById("languagesChart");
+
+    if (!languagesContainer || Object.keys(languages).length === 0) {
+      updateElementHtmlById(
+        "languagesChart",
+        '<p class="text-gray-600 dark:text-gray-300 italic">Nenhuma linguagem detectada</p>'
+      );
+      return;
+    }
+
+    const total = Object.values(languages).reduce(
+      (sum, bytes) => sum + bytes,
+      0
+    );
+    const languageEntries = Object.entries(languages)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+
+    const languageColors = {
+      JavaScript: "#f7df1e",
+      TypeScript: "#3178c6",
+      Python: "#3776ab",
+      Java: "#ed8b00",
+      "C++": "#00599c",
+      "C#": "#239120",
+      PHP: "#777bb4",
+      Ruby: "#cc342d",
+      Go: "#00add8",
+      Rust: "#000000",
+      HTML: "#e34f26",
+      CSS: "#1572b6",
+    };
+
+    const languageHtml = languageEntries
+      .map(([lang, bytes]) => {
+        const percentage = ((bytes / total) * 100).toFixed(1);
+        const color = languageColors[lang] || "#6b7280";
+        return `
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center">
+            <div class="w-3 h-3 rounded-full mr-2" style="background-color: ${color}"></div>
+            <span class="text-sm font-medium">${lang}</span>
+          </div>
+          <span class="text-sm text-gray-600 dark:text-gray-400">${percentage}%</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mb-3">
+          <div class="h-2 rounded-full" style="background-color: ${color}; width: ${percentage}%"></div>
+        </div>
+      `;
+      })
+      .join("");
+
+    updateElementHtmlById("languagesChart", languageHtml);
+    updateElementTextById("languagesCount", languageEntries.length.toString());
+    updateElementTextById("totalCodeBytes", formatBytes(total));
+  } catch (error) {
+    console.error("Erro ao carregar linguagens:", error);
+    updateElementHtmlById(
+      "languagesChart",
+      '<p class="text-gray-600 dark:text-gray-300 italic">Erro ao carregar linguagens</p>'
+    );
+  }
+}
+
+// Função para carregar commits recentes
+async function loadCommits() {
+  try {
+    const commits = await fetchWithRetry(`${REPO_URL}/commits?per_page=10`);
+    const commitContainer = document.getElementById("commitList");
+
+    if (!commits || commits.length === 0) {
+      updateElementHtmlById(
+        "commitList",
+        '<p class="text-gray-600 dark:text-gray-300 italic">Nenhum commit encontrado</p>'
+      );
+      return;
+    }
+
+    const commitHtml = commits
+      .map(
+        (commit, index) => `
+      <div class="list-item-animated bg-gray-50 dark:bg-gray-600 p-4 rounded-lg border border-gray-200 dark:border-gray-500" 
+           style="--animation-delay: ${index * 0.1}s">
+        <div class="flex items-start gap-3">
+          <img src="${commit.author?.avatar_url || "https://github.com/ghost.png"}" 
+               alt="Avatar" class="w-10 h-10 rounded-full flex-shrink-0">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2">
+              ${commit.commit.message.split("\n")[0]}
+            </p>
+            <div class="flex items-center gap-4 mt-2 text-xs text-gray-600 dark:text-gray-400">
+              <span>Por ${commit.commit.author.name}</span>
+              <span>${getTimeAgo(commit.commit.author.date)}</span>
+              <a href="${commit.html_url}" target="_blank" 
+                 class="text-blue-600 dark:text-blue-400 hover:underline">
+                ${commit.sha.substring(0, 7)}
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+      )
+      .join("");
+
+    updateElementHtmlById("commitList", commitHtml);
+    updateElementTextById("statsRecentCommits", commits.length.toString());
+  } catch (error) {
+    console.error("Erro ao carregar commits:", error);
+    updateElementHtmlById(
+      "commitList",
+      '<p class="text-gray-600 dark:text-gray-300 italic">Erro ao carregar commits</p>'
+    );
+  }
+}
+
+// Função para carregar issues recentes
+async function loadIssues() {
+  try {
+    const [openIssues, closedIssues] = await Promise.all([
+      fetchWithRetry(`${REPO_URL}/issues?state=open&per_page=10`),
+      fetchWithRetry(`${REPO_URL}/issues?state=closed&per_page=100`),
+    ]);
+
+    const issuesContainer = document.getElementById("issuesList");
+
+    if (!openIssues || openIssues.length === 0) {
+      updateElementHtmlById(
+        "issuesList",
+        '<p class="text-gray-600 dark:text-gray-300 italic">Nenhuma issue encontrada</p>'
+      );
+    } else {
+      const issuesHtml = openIssues
+        .map(
+          (issue, index) => `
+        <div class="list-item-animated bg-gray-50 dark:bg-gray-600 p-4 rounded-lg border border-gray-200 dark:border-gray-500"
+             style="--animation-delay: ${index * 0.1}s">
+          <div class="flex items-start gap-3">
+            <div class="flex-shrink-0">
+              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                         ${
+                           issue.state === "open"
+                             ? "bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200"
+                             : "bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200"
+                         }">
+                ${issue.state === "open" ? "Aberta" : "Fechada"}
+              </span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2">
+                ${issue.title}
+              </p>
+              <div class="flex items-center gap-4 mt-2 text-xs text-gray-600 dark:text-gray-400">
+                <span>#${issue.number}</span>
+                <span>Por ${issue.user.login}</span>
+                <span>${getTimeAgo(issue.created_at)}</span>
+                <a href="${issue.html_url}" target="_blank" 
+                   class="text-blue-600 dark:text-blue-400 hover:underline">
+                  Ver Issue
+                </a>
+              </div>
+              ${
+                issue.labels.length > 0
+                  ? `
+                <div class="flex flex-wrap gap-1 mt-2">
+                  ${issue.labels
+                    .slice(0, 3)
+                    .map(
+                      (label) => `
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
+                          style="background-color: #${label.color}20; color: #${label.color}">
+                      ${label.name}
+                    </span>
+                  `
+                    )
+                    .join("")}
+                </div>
+              `
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+      `
+        )
+        .join("");
+
+      updateElementHtmlById("issuesList", issuesHtml);
+    }
+
+    updateElementTextById("statsRecentIssues", openIssues.length.toString());
+    updateElementTextById("statsOpenIssues", openIssues.length.toString());
+    updateElementTextById("statsClosedIssues", closedIssues.length.toString());
+  } catch (error) {
+    console.error("Erro ao carregar issues:", error);
+    updateElementHtmlById(
+      "issuesList",
+      '<p class="text-gray-600 dark:text-gray-300 italic">Erro ao carregar issues</p>'
+    );
+  }
+}
+
+// Função para carregar estatísticas de visitas
+async function loadVisitStats() {
+  try {
+    const response = await fetch("/api/visit-stats");
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+
+    // Verificar se há erro na resposta
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    // Para compatibilidade, aceitar tanto data.data quanto data diretamente
+    const stats = data.data || data;
+
+    // Atualizar elementos da página principal usando a estrutura correta
+    if (stats.summary) {
+      updateElementTextById(
+        "visitsTotal",
+        (stats.summary.totalVisits || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visitsUnique",
+        (stats.summary.uniqueVisitors || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visitCount",
+        (stats.summary.totalVisits || 0).toLocaleString("pt-BR")
+      );
+    }
+
+    if (stats.trends) {
+      updateElementTextById(
+        "visits24h",
+        (stats.trends.last24hours?.totalVisits || 0).toLocaleString("pt-BR")
+      );
+      updateElementTextById(
+        "visits7d",
+        (stats.trends.last7days?.totalVisits || 0).toLocaleString("pt-BR")
+      );
+    }
+
+    // Atualizar estatísticas detalhadas se disponíveis
+    if (stats.devices) {
+      updateVisitStats(stats);
+    }
+
+    return stats;
+  } catch (error) {
+    console.error("Erro ao carregar estatísticas de visitas:", error);
+    // Valores padrão em caso de erro
+    updateElementTextById("visitsTotal", "0");
+    updateElementTextById("visitsUnique", "0");
+    updateElementTextById("visits24h", "0");
+    updateElementTextById("visits7d", "0");
+    updateElementTextById("visitCount", "0");
+    return null;
+  }
+}
+
+// Função para configurar navegação
+function setupNavigation() {
+  const mobileMenuButton = document.getElementById("mobileMenuButton");
+  const mobileSidebarMenu = document.getElementById("mobileSidebarMenu");
+  const mobileSidebarOverlay = document.getElementById("mobileSidebarOverlay");
+  const closeSidebarButton = document.getElementById("closeSidebarButton");
+
+  // Abrir sidebar mobile
+  if (mobileMenuButton) {
+    mobileMenuButton.addEventListener("click", () => {
+      mobileSidebarMenu?.classList.remove("-translate-x-full");
+      mobileSidebarOverlay?.classList.remove("hidden");
+      document.body.classList.add("sidebar-open");
+    });
+  }
+
+  // Fechar sidebar mobile
+  const closeSidebar = () => {
+    mobileSidebarMenu?.classList.add("-translate-x-full");
+    mobileSidebarOverlay?.classList.add("hidden");
+    document.body.classList.remove("sidebar-open");
+  };
+
+  if (closeSidebarButton) {
+    closeSidebarButton.addEventListener("click", closeSidebar);
+  }
+
+  if (mobileSidebarOverlay) {
+    mobileSidebarOverlay.addEventListener("click", closeSidebar);
+  }
+
+  // Configurar links de navegação suave
+  const navLinks = document.querySelectorAll('a[href^="#"]');
+  navLinks.forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const targetId = link.getAttribute("href");
+      const targetElement = document.querySelector(targetId);
+
+      if (targetElement) {
+        // Fechar sidebar se estiver aberto
+        closeSidebar();
+
+        // Scroll suave para o elemento
+        targetElement.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+
+        // Adicionar highlight ao elemento
+        targetElement.classList.add("section-highlight");
+        setTimeout(() => {
+          targetElement.classList.remove("section-highlight");
+        }, 2000);
+
+        // Atualizar estado ativo dos links
+        updateActiveNavLink(targetId);
+      }
+    });
+  });
+}
+
+// Função para atualizar link ativo na navegação
+function updateActiveNavLink(targetId) {
+  // Remover classe active de todos os links
+  document
+    .querySelectorAll(".desktop-menu-link, .sidebar-link")
+    .forEach((link) => {
+      link.classList.remove("active");
+    });
+
+  // Adicionar classe active ao link correto
+  document.querySelectorAll(`a[href="${targetId}"]`).forEach((link) => {
+    link.classList.add("active");
+    if (link.classList.contains("desktop-menu-link")) {
+      link.classList.add("pulse-selection");
+      setTimeout(() => {
+        link.classList.remove("pulse-selection");
+      }, 600);
+    }
+  });
+}
+
+// Função de inicialização
+async function init() {
+  try {
+    // Configurar ano atual no footer
+    const currentYearElement = document.getElementById("currentYear");
+    if (currentYearElement) {
+      currentYearElement.textContent = new Date().getFullYear().toString();
+    }
+
+    // Registrar visita
+    await recordVisit();
+
+    // Configurar navegação
+    setupNavigation();
+
+    // Carregar dados em paralelo
+    await Promise.all([
+      loadRepositoryData(),
+      loadLanguages(),
+      loadCommits(),
+      loadIssues(),
+      loadVisitStats(),
+    ]);
+
+    console.log("Inicialização concluída com sucesso");
+  } catch (error) {
+    console.error("Erro na inicialização:", error);
+    showError("Erro ao carregar dados. Tente recarregar a página.");
+  }
+}
+
+// Inicializar quando o DOM estiver carregado
+document.addEventListener("DOMContentLoaded", init);
