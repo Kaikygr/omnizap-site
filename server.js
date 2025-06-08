@@ -7,6 +7,8 @@ const morgan = require("morgan");
 const useragent = require("express-useragent");
 require("dotenv").config();
 
+const VisitStatsProcessor = require("./lib/visitStats");
+
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const VISITS_FILE = path.join(__dirname, "database", "visits.json");
@@ -54,6 +56,8 @@ app.use(
 );
 
 app.use(useragent.express());
+app.use(express.json());
+app.use(express.static("public"));
 
 async function ensureDatabaseDir() {
   const dir = path.dirname(VISITS_FILE);
@@ -132,227 +136,181 @@ app.use(async (req, res, next) => {
   next();
 });
 
-app.get("/api/visits/count", async (req, res) => {
+// Endpoint para dados do GitHub
+app.get("/api/server-data", async (req, res) => {
   try {
-    const visitsData = await readVisits();
-    res.json({ totalVisits: visitsData.totalVisits || 0 });
-  } catch (error) {
-    console.error("Erro ao obter contagem de visitas:", error);
-    res
-      .status(500)
-      .json({ error: "Erro ao obter contagem de visitas", totalVisits: 0 });
-  }
-});
+    const githubData = await readJsonFile(GITHUB_CACHE_FILE);
 
-app.get("/api/health", async (req, res) => {
-  try {
-    const cache = await readGithubCache();
-    const visitsData = await readVisits();
+    if (!githubData.data) {
+      return res.json({
+        success: false,
+        error: "Dados do GitHub não encontrados",
+      });
+    }
 
     res.json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      cache: {
-        lastUpdated: cache.lastUpdated,
-        hasData: !!cache.data,
-        hasError: !!cache.error,
-      },
-      visits: {
-        total: visitsData.totalVisits || 0,
-        hasData: !!visitsData.visits,
-      },
+      success: true,
+      data: githubData.data,
+      lastUpdated: githubData.lastUpdated,
     });
   } catch (error) {
+    console.error("Erro ao carregar dados do GitHub:", error);
     res.status(500).json({
-      status: "unhealthy",
-      error: error.message,
-      timestamp: new Date().toISOString(),
+      success: false,
+      error: "Erro interno do servidor",
     });
   }
 });
 
-async function fetchGitHubAPI(endpoint) {
-  const headers = {
-    Accept: "application/vnd.github.v3+json",
-    "User-Agent": "omnizap-site/1.0.0",
-  };
-
-  if (GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
-  }
-
+// Endpoint para registrar visita
+app.post("/api/visits", async (req, res) => {
   try {
-    const response = await fetch(`${GITHUB_API_BASE_URL}${endpoint}`, {
-      headers,
-      timeout: 10000,
-    });
+    const { userAgent, referrer, url } = req.body;
+    const ip = req.ip || req.connection.remoteAddress;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        `GitHub API Error for ${endpoint}: ${response.status} ${response.statusText}`,
-        errorText
-      );
-      throw new Error(
-        `GitHub API Error: ${response.status} ${response.statusText}`
-      );
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error(`Erro ao buscar ${endpoint}:`, error.message);
-    throw error;
-  }
-}
-
-async function readGithubCache() {
-  try {
-    const data = await fs.readFile(GITHUB_CACHE_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (error) {
-    return { lastUpdated: null, data: null, error: null };
-  }
-}
-
-async function saveGithubCache(cacheData) {
-  try {
-    await fs.writeFile(
-      GITHUB_CACHE_FILE,
-      JSON.stringify(cacheData, null, 2),
-      "utf8"
-    );
-  } catch (error) {
-    console.error("Erro ao salvar cache do GitHub:", error);
-  }
-}
-
-async function shouldUpdateCache() {
-  const cache = await readGithubCache();
-  if (!cache.lastUpdated) return true;
-
-  const lastUpdate = new Date(cache.lastUpdated).getTime();
-  const now = Date.now();
-  return now - lastUpdate > CACHE_UPDATE_INTERVAL_MS;
-}
-
-async function updateGitHubDataCache() {
-  if (githubDataCache.isFetching) {
-    console.log("Atualização já em progresso. Pulando.");
-    return;
-  }
-
-  if (!(await shouldUpdateCache())) {
-    console.log("Cache ainda válido. Pulando atualização.");
-    return;
-  }
-
-  githubDataCache.isFetching = true;
-  console.log("Buscando dados atualizados do GitHub...");
-
-  try {
-    const apiPromises = [
-      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}`),
-      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/commits?per_page=5`),
-      fetchGitHubAPI(
-        `/repos/${REPO_OWNER}/${REPO_NAME}/issues?per_page=5&state=all`
-      ),
-      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/languages`),
-      fetchGitHubAPI(`/repos/${REPO_OWNER}/${REPO_NAME}/license`).catch(
-        (err) => {
-          if (err.message && err.message.includes("404"))
-            return { name: "Não especificada" };
-          throw err;
-        }
-      ),
-    ];
-
-    const [repoDetails, commits, issues, languages, license] =
-      await Promise.all(apiPromises);
-
-    let locCount = 0;
-    if (languages && Object.keys(languages).length > 0) {
-      const totalBytes = Object.values(languages).reduce((a, b) => a + b, 0);
-      const APPROX_BYTES_PER_LINE_OF_CODE = 30;
-      locCount = Math.round(totalBytes / APPROX_BYTES_PER_LINE_OF_CODE);
-    }
-
-    const cacheData = {
-      lastUpdated: new Date().toISOString(),
-      data: {
-        repoDetails,
-        commits,
-        issues,
-        languages,
-        licenseInfo: license.license || license,
-        locCount,
-      },
-      error: null,
+    const visit = {
+      id: Date.now() + Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      ip: ip,
+      userAgent: userAgent,
+      referrer: referrer || "",
+      url: url || "",
+      device: getDeviceType(userAgent),
+      browser: getBrowser(userAgent),
+      os: getOS(userAgent),
     };
 
-    await saveGithubCache(cacheData);
-    githubDataCache.data = cacheData.data;
-    githubDataCache.lastUpdated = cacheData.lastUpdated;
-    githubDataCache.error = null;
+    const visitsData = await readJsonFile(VISITS_FILE, { visits: [] });
+    visitsData.visits.push(visit);
 
-    console.log("Cache do GitHub atualizado com sucesso.");
-  } catch (error) {
-    console.error("Erro ao atualizar cache do GitHub:", error);
-    githubDataCache.error = error.message;
+    // Manter apenas os últimos 1000 registros
+    if (visitsData.visits.length > 1000) {
+      visitsData.visits = visitsData.visits.slice(-1000);
+    }
 
-    await saveGithubCache({
-      lastUpdated: new Date().toISOString(),
-      data: null,
-      error: error.message,
+    await writeJsonFile(VISITS_FILE, visitsData);
+
+    res.json({
+      success: true,
+      message: "Visita registrada com sucesso",
     });
-  } finally {
-    githubDataCache.isFetching = false;
+  } catch (error) {
+    console.error("Erro ao registrar visita:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erro ao registrar visita",
+    });
+  }
+});
+
+// Endpoint para estatísticas de visitas
+app.get("/api/visits/stats", async (req, res) => {
+  try {
+    const statsProcessor = new VisitStatsProcessor(VISITS_FILE);
+    const stats = await statsProcessor.processAllStats();
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    console.error("Erro ao calcular estatísticas:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erro ao calcular estatísticas",
+    });
+  }
+});
+
+// Endpoint para obter todas as visitas (admin)
+app.get("/api/visits/all", async (req, res) => {
+  try {
+    const visitsData = await readJsonFile(VISITS_FILE, { visits: [] });
+
+    res.json({
+      success: true,
+      data: visitsData.visits || [],
+    });
+  } catch (error) {
+    console.error("Erro ao carregar visitas:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erro ao carregar visitas",
+    });
+  }
+});
+
+// Servir página principal
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+async function readJsonFile(filePath, defaultValue = {}) {
+  try {
+    const data = await fs.readFile(filePath, "utf8");
+    return JSON.parse(data);
+  } catch (error) {
+    console.log(`Arquivo ${filePath} não encontrado, criando...`);
+    await writeJsonFile(filePath, defaultValue);
+    return defaultValue;
   }
 }
 
-app.get("/", async (req, res) => {
+async function writeJsonFile(filePath, data) {
   try {
-    const filePath = path.join(PUBLIC_DIR, "index.html");
-    const content = await fs.readFile(filePath, "utf8");
-    res.status(200).type("text/html").send(content);
-  } catch (err) {
-    console.error(`Erro ao ler index.html:`, err);
-    res.status(500).send("Erro interno do servidor.");
-  }
-});
-
-app.get("/api/github-data", async (req, res) => {
-  try {
-    const cache = await readGithubCache();
-
-    if (cache.data) {
-      res.json({
-        ...cache.data,
-        serverLastUpdated: cache.lastUpdated,
-        serverError: cache.error,
-      });
-    } else if (cache.error) {
-      res.status(500).json({
-        error: "Falha ao buscar dados do GitHub",
-        details: cache.error,
-        serverLastUpdated: cache.lastUpdated,
-      });
-    } else {
-      res.status(503).json({
-        error: "Dados ainda não disponíveis",
-        serverLastUpdated: null,
-      });
-    }
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
   } catch (error) {
-    res.status(500).json({ error: "Erro ao ler cache do GitHub" });
+    console.error(`Erro ao escrever arquivo ${filePath}:`, error);
   }
-});
+}
 
-app.use(express.static(PUBLIC_DIR));
+// Funções de visitas
+function getDeviceType(userAgent) {
+  if (/Mobile|Android|iPhone|iPad/.test(userAgent)) return "Mobile";
+  if (/Tablet/.test(userAgent)) return "Tablet";
+  return "Desktop";
+}
+
+function getBrowser(userAgent) {
+  if (userAgent.includes("Chrome")) return "Chrome";
+  if (userAgent.includes("Firefox")) return "Firefox";
+  if (userAgent.includes("Safari")) return "Safari";
+  if (userAgent.includes("Edge")) return "Edge";
+  return "Outro";
+}
+
+function getOS(userAgent) {
+  if (userAgent.includes("Windows")) return "Windows";
+  if (userAgent.includes("Mac")) return "macOS";
+  if (userAgent.includes("Linux")) return "Linux";
+  if (userAgent.includes("Android")) return "Android";
+  if (userAgent.includes("iOS")) return "iOS";
+  return "Outro";
+}
 
 let server;
 let updateInterval;
+
+// Função para atualizar cache do GitHub
+async function updateGitHubDataCache() {
+  try {
+    console.log("Atualizando cache do GitHub...");
+
+    // Esta função pode ser expandida futuramente para buscar dados do GitHub
+    // Por enquanto, apenas cria um cache vazio se não existir
+    const cacheData = {
+      lastUpdated: new Date().toISOString(),
+      repoData: {},
+      // Adicionar mais dados conforme necessário
+    };
+
+    await writeJsonFile(GITHUB_CACHE_FILE, cacheData);
+    console.log("Cache do GitHub atualizado com sucesso");
+  } catch (error) {
+    console.error("Erro ao atualizar cache do GitHub:", error);
+  }
+}
 
 async function startServer() {
   try {

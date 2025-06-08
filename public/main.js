@@ -1,475 +1,741 @@
+// Configurações e constantes
 const CONFIG = {
-  CACHE_DURATION: 5 * 60 * 1000,
-  DATE_FORMAT: {
-    dateStyle: "medium",
-    timeStyle: "short",
-  },
+  CACHE_DURATION: 5 * 60 * 1000, // 5 minutos
   API_ENDPOINTS: {
-    GITHUB: "/api/github-data",
-    VISITS: "/api/visits/count",
+    SERVER_DATA: "/api/server-data",
+    VISITS: "/api/visits",
+    VISIT_STATS: "/api/visits/stats",
   },
 };
 
-const clientCache = {
-  data: new Map(),
-  set(key, value, duration = CONFIG.CACHE_DURATION) {
-    const item = {
-      value,
-      timestamp: Date.now(),
-      expiry: Date.now() + duration,
-    };
-    this.data.set(key, item);
-    return item;
+const cache = new Map();
+
+// Dados de fallback baseados no github-cache.json
+const FALLBACK_DATA = {
+  repoDetails: {
+    name: "omnizap",
+    description:
+      "🔥 OmniZap — Bot de WhatsApp open-source e educacional, desenvolvido em JavaScript com a biblioteca Baileys. OmniZap é um projeto open-source criado para fins de estudo, desenvolvimento e aprendizado, permitindo criar automações, gerenciar grupos, baixar mídias e muito mais no WhatsApp.",
+    language: "JavaScript",
+    stargazers_count: 1,
+    forks_count: 0,
+    watchers_count: 1,
+    open_issues_count: 0,
+    size: 868,
+    created_at: "2025-05-23T01:55:20Z",
+    updated_at: "2025-06-07T00:40:46Z",
+    pushed_at: "2025-06-08T17:15:06Z",
+    html_url: "https://github.com/Kaikygr/omnizap",
+    visibility: "public",
+    default_branch: "main",
+    allow_forking: true,
+    is_template: false,
+    archived: false,
+    disabled: false,
+    has_issues: true,
+    has_projects: true,
+    has_wiki: false,
+    has_pages: false,
+    has_discussions: false,
+    has_downloads: true,
+    allow_squash_merge: true,
+    allow_merge_commit: true,
+    allow_rebase_merge: true,
+    network_count: 0,
+    subscribers_count: 1,
+    license: {
+      name: "MIT License",
+      spdx_id: "MIT",
+    },
+    owner: {
+      login: "Kaikygr",
+      id: 182138885,
+      avatar_url: "https://avatars.githubusercontent.com/u/182138885?v=4",
+      html_url: "https://github.com/Kaikygr",
+      type: "User",
+      site_admin: false,
+    },
+    security_and_analysis: {
+      secret_scanning: {
+        status: "disabled",
+      },
+      dependabot_security_updates: {
+        status: "disabled",
+      },
+    },
   },
-  get(key) {
-    const item = this.data.get(key);
-    if (!item) return null;
-    if (Date.now() > item.expiry) {
-      this.data.delete(key);
-      return null;
-    }
-    return item.value;
+  commits: [
+    {
+      sha: "e110ee05",
+      commit: {
+        message:
+          "Merge pull request #8: Refatorar e aprimorar a configuração do ambiente para maior estabilidade",
+        author: {
+          name: "Kaiky Brito",
+          date: "2025-06-07T00:32:34Z",
+        },
+      },
+      author: {
+        login: "Kaikygr",
+      },
+    },
+    {
+      sha: "211303b7",
+      commit: {
+        message:
+          "refactor: melhora a configuração do sistema, unificando a definição do nome",
+        author: {
+          name: "kaikygr",
+          date: "2025-06-07T00:27:18Z",
+        },
+      },
+      author: {
+        login: "Kaikygr",
+      },
+    },
+  ],
+  issues: [
+    {
+      id: 3126172543,
+      title:
+        "Refatorar e aprimorar a configuração do ambiente para maior estabilidade",
+      state: "closed",
+      created_at: "2025-06-07T00:30:45Z",
+      user: {
+        login: "Kaikygr",
+      },
+    },
+  ],
+  languages: {
+    JavaScript: 91410,
+    Shell: 6902,
   },
-  clear() {
-    this.data.clear();
+  licenseInfo: {
+    name: "MIT License",
+    spdx_id: "MIT",
   },
+  locCount: 3277,
 };
 
-async function fetchWithCache(url, options = {}) {
-  const cacheKey = url;
-  const cachedData = clientCache.get(cacheKey);
+// Funções utilitárias
+function formatNumber(num) {
+  if (typeof num !== "number") return "0";
+  return new Intl.NumberFormat("pt-BR").format(num);
+}
 
-  if (cachedData) {
-    return cachedData;
-  }
-
+function formatDate(dateString) {
+  if (!dateString) return "N/A";
   try {
-    const response = await fetch(url, options);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    clientCache.set(cacheKey, data);
-    return data;
+    return new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(dateString));
   } catch (error) {
-    console.error(`Erro ao buscar ${url}:`, error);
-    throw error;
+    return "Data inválida";
   }
 }
 
-async function fetchServerData() {
-  try {
-    const data = await fetchWithCache(CONFIG.API_ENDPOINTS.GITHUB);
-    if (data.serverError) {
-      displayGlobalError(
-        `Aviso: ${data.serverError}. Os dados podem estar desatualizados.`
-      );
-    }
-    return data;
-  } catch (error) {
-    const message = `Falha ao comunicar com o servidor: ${error.message}`;
-    displayGlobalError(message);
-    throw error;
-  }
-}
-
-const formatDate = (date) =>
-  new Date(date).toLocaleString("pt-BR", CONFIG.DATE_FORMAT);
-const formatNumber = (num) => num?.toLocaleString("pt-BR") || "0";
-
-function sanitizeHTML(str) {
-  const temp = document.createElement("div");
-  temp.textContent = str;
-  return temp.innerHTML;
-}
-
-function updateUI(data) {
-  const {
-    repoDetails,
-    commits,
-    issues,
-    languages,
-    licenseInfo,
-    locCount,
-    releases,
-    codeFrequency,
-    forksList,
-  } = data;
-
-  if (repoDetails) {
-    const fallbackProjectName = "omnizap";
-    setText("pageTitle", `Projeto: ${repoDetails.name || fallbackProjectName}`);
-    setText("projectName", repoDetails.name);
-    setText("projectOwner", repoDetails.owner?.login);
-    setText("projectDescription", repoDetails.description);
-    setText("projectLanguage", repoDetails.language);
-    setText("stargazersCount", formatNumber(repoDetails.stargazers_count));
-    setText("forksCount", formatNumber(repoDetails.forks_count));
-    setText("watchersCount", formatNumber(repoDetails.subscribers_count));
-    setText("repoSize", `${(repoDetails.size / 1024).toFixed(2)} MB`);
-    setText("lastUpdated", formatDate(repoDetails.updated_at));
-    setText("createdAt", formatDate(repoDetails.created_at));
-    setText("pushedAt", formatDate(repoDetails.pushed_at));
-    setText("openIssuesCount", formatNumber(repoDetails.open_issues_count));
-    setLink("projectHtmlUrl", repoDetails.html_url);
-  }
-
-  const commitList = document.getElementById("commitList");
-  commitList.innerHTML = "";
-  if (commits && commits.length > 0) {
-    commits.forEach((commit, index) => {
-      const commitElement = createCommitElement(commit);
-      commitElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
-      commitList.appendChild(commitElement);
-    });
-  } else {
-    const noCommits = document.createElement("p");
-    noCommits.className = "text-slate-600 dark:text-slate-400";
-    noCommits.textContent = "Nenhum commit encontrado.";
-    commitList.appendChild(noCommits);
-  }
-
-  const issuesList = document.getElementById("issuesList");
-  issuesList.innerHTML = "";
-  if (issues && issues.length > 0) {
-    issues.forEach((issue, index) => {
-      const issueElement = createIssueElement(issue); // createIssueElement will be updated
-      issueElement.style.setProperty("--animation-delay", `${index * 0.05}s`);
-      issuesList.appendChild(issueElement);
-    });
-  } else {
-    const noIssues = document.createElement("p");
-    noIssues.className = "text-gray-600 dark:text-gray-300"; // Updated
-    noIssues.textContent = "Nenhuma issue encontrada.";
-    issuesList.appendChild(noIssues);
-  }
-
-  const languagesChart = document.getElementById("languagesChart");
-  languagesChart.innerHTML = "";
-  if (languages && Object.keys(languages).length > 0) {
-    const total = Object.values(languages).reduce((a, b) => a + b, 0);
-    const colors = ["#2563EB", "#14B8A6", "#B45309", "#6B7280", "#EC4899"]; // Updated: Blue-600, Teal-500, Amber-700, Gray-500, Pink-500
-
-    Object.entries(languages)
-      .sort(([, a], [, b]) => b - a)
-      .forEach(([lang, bytes], index) => {
-        if (total > 0) {
-          const percentage = (bytes / total) * 100;
-          const color = colors[index % colors.length];
-          languagesChart.appendChild(
-            // createLanguageBar will be updated
-            createLanguageBar(lang, percentage, color)
-          );
-        }
-      });
-  } else {
-    const noLanguages = document.createElement("p");
-    noLanguages.className = "text-gray-600 dark:text-gray-300"; // Updated
-    noLanguages.textContent = "Dados de linguagens não disponíveis.";
-    languagesChart.appendChild(noLanguages);
-  }
-
-  setText(
-    "licenseInfo",
-    licenseInfo?.license?.name || licenseInfo?.name || "Não especificada"
-  );
-  setText(
-    "locCount",
-    locCount > 0 ? locCount.toLocaleString("pt-BR") + " linhas" : "N/A"
-  );
-
-  // Remove seções que mostram dados vazios/sem dados
-  // As seções de Releases, Code Frequency, Forks e Dependências foram removidas
-  // para evitar mostrar mensagens de "sem dados" ao usuário
-
-  // Populate new stats in the "Estatísticas e Gráficos" section
-  if (repoDetails) {
-    setText("statsOpenIssues", formatNumber(repoDetails.open_issues_count));
-  }
-  if (commits) {
-    setText("statsRecentCommits", formatNumber(commits.length));
-  }
-  if (issues) {
-    setText("statsRecentIssues", formatNumber(issues.length));
-  }
-}
-
-function displayGlobalError(message) {
-  const errorDiv = document.getElementById("errorMessageGlobal");
-  errorDiv.innerHTML = `
-    <div class="flex items-center">
-      <div class="flex-shrink-0">
-        <svg class="h-5 w-5 text-amber-100" viewBox="0 0 20 20" fill="currentColor"> {/* Updated icon color */}
-          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-        </svg>
-      </div>
-      <div class="ml-3"> {/* Text color will be white due to parent class */}
-        <p class="text-sm">${message}</p>
-      </div>
-    </div>`;
-  errorDiv.classList.remove("hidden");
-  errorDiv.classList.add(
-    "border",
-    "bg-amber-700",
-    "border-amber-800",
-    "text-white",
-    "px-4",
-    "py-3",
-    "rounded",
-    "relative"
-  );
-}
-
-function setText(elementId, text, defaultValue = "Não disponível") {
+function setText(elementId, text) {
   const element = document.getElementById(elementId);
   if (element) {
-    element.textContent = text || defaultValue;
+    element.textContent = text;
     element.classList.remove("loading-placeholder");
   }
 }
 
-function setLink(elementId, url) {
+function setHtml(elementId, html) {
   const element = document.getElementById(elementId);
-  const navElement = document.getElementById(elementId + "Nav");
-  const headerElement = document.getElementById("headerGithubLink");
-  if (element && url) {
-    element.href = url;
-    element.classList.remove("hidden");
-    if (navElement) navElement.href = url;
-    if (headerElement) headerElement.href = url;
+  if (element) {
+    element.innerHTML = html;
+    element.classList.remove("loading-placeholder");
   }
 }
 
-function createCommitElement(commit) {
-  const div = document.createElement("div");
-  div.className =
-    "bg-white dark:bg-gray-700 p-4 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-200 list-item-animated border border-gray-200 dark:border-gray-600";
+// Cache e fetch
+async function fetchWithCache(url, maxAge = CONFIG.CACHE_DURATION) {
+  const cacheKey = url;
+  const cached = cache.get(cacheKey);
 
-  const messageLink = document.createElement("a");
-  messageLink.href = commit.html_url;
-  messageLink.target = "_blank";
-  messageLink.className =
-    "font-medium text-teal-500 hover:text-teal-600 dark:text-teal-400 dark:hover:text-teal-300";
-  messageLink.textContent = commit.commit.message.split("\n")[0];
+  if (cached && Date.now() - cached.timestamp < maxAge) {
+    return cached.data;
+  }
 
-  const shaShort = commit.sha.substring(0, 7);
-  const shaSpan = document.createElement("span");
-  shaSpan.className = "ml-2 text-xs text-gray-500 dark:text-gray-400 font-mono";
-  shaSpan.textContent = `(${shaShort})`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
 
-  const messageContainer = document.createElement("div");
-  messageContainer.append(messageLink, shaSpan);
-  const details = document.createElement("div");
-  details.className =
-    "mt-2 text-sm text-gray-600 dark:text-gray-300 flex justify-between items-center"; // Updated
+    cache.set(cacheKey, {
+      data,
+      timestamp: Date.now(),
+    });
 
-  const author = document.createElement("span");
-  author.textContent = `por ${commit.commit.author.name}`;
+    return data;
+  } catch (error) {
+    console.error(`Erro ao buscar ${url}:`, error);
+    if (cached) {
+      console.log("Usando dados em cache expirados");
+      return cached.data;
+    }
+    throw error;
+  }
+}
 
-  const date = document.createElement("span");
-  date.textContent = new Date(commit.commit.author.date).toLocaleDateString(
-    "pt-BR"
+// Principais funções de atualização da UI
+function updateUI(data) {
+  if (!data) {
+    console.log("Usando dados de fallback");
+    data = FALLBACK_DATA;
+  }
+
+  try {
+    // Informações básicas do projeto
+    setText("projectName", data.repoDetails?.name || "omnizap");
+    setText(
+      "projectDescription",
+      data.repoDetails?.description || "Bot de WhatsApp open-source"
+    );
+    setText("projectLanguage", data.repoDetails?.language || "JavaScript");
+    setText(
+      "stargazersCount",
+      formatNumber(data.repoDetails?.stargazers_count || 1)
+    );
+    setText("forksCount", formatNumber(data.repoDetails?.forks_count || 0));
+    setText(
+      "watchersCount",
+      formatNumber(data.repoDetails?.watchers_count || 1)
+    );
+    setText(
+      "openIssuesCount",
+      formatNumber(data.repoDetails?.open_issues_count || 0)
+    );
+    setText("repoSize", `${formatNumber(data.repoDetails?.size || 868)} KB`);
+
+    // Informações de licença
+    const license = data.licenseInfo || data.repoDetails?.license;
+    setText("licenseInfo", license?.name || "MIT License");
+
+    // Datas importantes
+    if (data.repoDetails?.created_at) {
+      setText("createdAt", formatDate(data.repoDetails.created_at));
+    }
+    if (data.repoDetails?.updated_at) {
+      setText("lastUpdated", formatDate(data.repoDetails.updated_at));
+    }
+    if (data.repoDetails?.pushed_at) {
+      setText("pushedAt", formatDate(data.repoDetails.pushed_at));
+    }
+
+    // Contagem de linhas de código
+    setText("locCount", formatNumber(data.locCount || 3277));
+
+    // Informações do desenvolvedor/owner
+    updateDeveloperInfo(data.repoDetails?.owner);
+
+    // Estatísticas do repositório
+    updateRepositoryStats(data.repoDetails);
+
+    // Link do projeto
+    const projectUrl =
+      data.repoDetails?.html_url || "https://github.com/Kaikygr/omnizap";
+    updateProjectLinks(projectUrl);
+
+    // Distribuição de linguagens
+    if (data.languages) {
+      updateLanguagesChart(data.languages);
+    }
+
+    // Commits recentes
+    if (data.commits) {
+      updateCommitsList(data.commits);
+    }
+
+    // Issues recentes
+    if (data.issues) {
+      updateIssuesList(data.issues);
+    }
+
+    // Estatísticas adicionais
+    updateAdditionalStats(data);
+  } catch (error) {
+    console.error("Erro ao atualizar UI:", error);
+  }
+}
+
+function updateDeveloperInfo(owner) {
+  if (!owner) {
+    owner = FALLBACK_DATA.repoDetails.owner;
+  }
+
+  setText("developerName", owner.login || "Kaikygr");
+  setText(
+    "developerType",
+    owner.type === "User" ? "Usuário" : owner.type || "Usuário"
   );
+  setText("developerId", `#${owner.id || "182138885"}`);
 
-  details.appendChild(author);
-  details.appendChild(date);
-  div.appendChild(messageContainer);
-  div.appendChild(details);
+  const avatarImg = document.getElementById("developerAvatar");
+  if (avatarImg && owner.avatar_url) {
+    avatarImg.src = owner.avatar_url;
+    avatarImg.alt = `Avatar de ${owner.login}`;
+  }
 
-  return div;
+  const profileLink = document.getElementById("developerProfile");
+  if (profileLink && owner.html_url) {
+    profileLink.href = owner.html_url;
+  }
 }
 
-function createIssueElement(issue) {
-  const div = document.createElement("div");
-  div.className =
-    "bg-white dark:bg-gray-700 p-4 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-200 list-item-animated border border-gray-200 dark:border-gray-600";
+function updateRepositoryStats(repoDetails) {
+  if (!repoDetails) return;
 
-  const title = document.createElement("a");
-  title.href = issue.html_url;
-  title.target = "_blank";
-  title.className =
-    "font-medium text-teal-500 hover:text-teal-600 dark:text-teal-400 dark:hover:text-teal-300"; // Updated to Teal for links
-  title.textContent = issue.title;
+  setText(
+    "allowForking",
+    repoDetails.allow_forking ? "Permitido" : "Não permitido"
+  );
+  setText("isTemplate", repoDetails.is_template ? "Sim" : "Não");
+  setText("isArchived", repoDetails.archived ? "Sim" : "Não");
+  setText("isDisabled", repoDetails.disabled ? "Sim" : "Não");
+  setText(
+    "visibility",
+    repoDetails.visibility === "public" ? "Público" : "Privado"
+  );
+  setText("defaultBranch", repoDetails.default_branch || "main");
 
-  const status = document.createElement("span");
-  status.className = `ml-2 px-2 py-1 rounded-full text-xs ${
-    issue.state === "open"
-      ? "bg-green-100 text-green-700 dark:bg-green-700 dark:text-green-100"
-      : "bg-red-100 text-red-700 dark:bg-red-700 dark:text-red-100"
-  }`;
-  status.textContent = issue.state;
+  setText("allowSquashMerge", repoDetails.allow_squash_merge ? "Sim" : "Não");
+  setText("allowMergeCommit", repoDetails.allow_merge_commit ? "Sim" : "Não");
+  setText("allowRebaseMerge", repoDetails.allow_rebase_merge ? "Sim" : "Não");
 
-  div.appendChild(title);
-  div.appendChild(status);
-  return div;
+  setText("hasIssues", repoDetails.has_issues ? "Sim" : "Não");
+  setText("hasProjects", repoDetails.has_projects ? "Sim" : "Não");
+  setText("hasWiki", repoDetails.has_wiki ? "Sim" : "Não");
+  setText("hasPages", repoDetails.has_pages ? "Sim" : "Não");
+  setText("hasDiscussions", repoDetails.has_discussions ? "Sim" : "Não");
+  setText("hasDownloads", repoDetails.has_downloads ? "Sim" : "Não");
+
+  setText("networkCount", formatNumber(repoDetails.network_count || 0));
+  setText("subscribersCount", formatNumber(repoDetails.subscribers_count || 1));
 }
 
-function createLanguageBar(language, percentage, color) {
-  const div = document.createElement("div");
-  div.className = "mb-2";
-
-  const label = document.createElement("div");
-  label.className = "flex justify-between text-sm mb-1";
-  label.innerHTML = ` 
-    <span class="text-gray-900 dark:text-gray-50">${language}</span> 
-    <span class="text-gray-600 dark:text-gray-300">${percentage.toFixed(
-      // Updated
-      1
-    )}%</span>
-  `;
-
-  const barContainer = document.createElement("div");
-  barContainer.className =
-    "w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5"; // Updated
-
-  const bar = document.createElement("div");
-  bar.className = "h-2.5 rounded-full transition-all duration-500";
-  bar.style.width = `${percentage}%`;
-  bar.style.backgroundColor = color || "#2563EB"; // Default to primary blue-600
-
-  barContainer.appendChild(bar);
-  div.appendChild(label);
-  div.appendChild(barContainer);
-
-  return div;
-}
-
-document.addEventListener("DOMContentLoaded", async () => {
-  document.getElementById("currentYear").textContent = new Date().getFullYear();
-  const loadingBarElement =
-    document.getElementById("loadingBar")?.firstElementChild;
-
-  const showLoadingBar = () => {
-    if (loadingBarElement) {
-      loadingBarElement.style.width = "0%";
-      loadingBarElement.parentElement.classList.remove("opacity-0"); // Make it visible
-      loadingBarElement.parentElement.classList.add("opacity-100");
-      // Animate to a certain percentage to show activity
-      setTimeout(() => {
-        loadingBarElement.style.width = "30%";
-      }, 100);
+function updateProjectLinks(url) {
+  const links = ["projectHtmlUrl", "headerGithubLink", "sidebarGithubLink"];
+  links.forEach((linkId) => {
+    const element = document.getElementById(linkId);
+    if (element) {
+      element.href = url;
     }
+  });
+}
+
+function updateLanguagesChart(languages) {
+  const container = document.getElementById("languagesChart");
+  if (!container || !languages) return;
+
+  const total = Object.values(languages).reduce((sum, bytes) => sum + bytes, 0);
+  const languageEntries = Object.entries(languages)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
+
+  const languageColors = {
+    JavaScript: "#f1e05a",
+    TypeScript: "#2b7489",
+    Python: "#3572A5",
+    Java: "#b07219",
+    "C++": "#f34b7d",
+    C: "#555555",
+    Shell: "#89e051",
+    HTML: "#e34c26",
+    CSS: "#563d7c",
+    PHP: "#4F5D95",
   };
 
-  const completeLoadingBar = () => {
-    if (loadingBarElement) {
-      loadingBarElement.style.width = "100%";
-      setTimeout(() => {
-        loadingBarElement.parentElement.classList.remove("opacity-100");
-        loadingBarElement.parentElement.classList.add("opacity-0");
-        setTimeout(() => {
-          loadingBarElement.style.width = "0%";
-        }, 300); // Reset after fade out
-      }, 500);
+  const chartHtml = languageEntries
+    .map(([language, bytes]) => {
+      const percentage = ((bytes / total) * 100).toFixed(1);
+      const color = languageColors[language] || "#6b7280";
+
+      return `
+      <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-600 rounded text-sm">
+        <div class="flex items-center gap-2">
+          <div class="w-3 h-3 rounded-full" style="background-color: ${color}"></div>
+          <span class="font-medium">${language}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-600 dark:text-gray-300">${percentage}%</span>
+          <span class="text-xs text-gray-500">(${formatNumber(bytes)} bytes)</span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  setHtml("languagesChart", chartHtml);
+}
+
+function updateCommitsList(commits) {
+  const container = document.getElementById("commitList");
+  if (!container || !commits?.length) {
+    setHtml(
+      "commitList",
+      '<p class="text-gray-600 dark:text-gray-300 italic">Nenhum commit encontrado.</p>'
+    );
+    return;
+  }
+
+  const commitsHtml = commits
+    .slice(0, 5)
+    .map((commit) => {
+      const message = commit.commit?.message || "Sem mensagem";
+      const author =
+        commit.author?.login ||
+        commit.commit?.author?.name ||
+        "Autor desconhecido";
+      const date = formatDate(commit.commit?.author?.date);
+      const sha = commit.sha?.substring(0, 7) || "";
+
+      return `
+      <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow">
+        <div class="flex items-start justify-between mb-2">
+          <h4 class="font-medium text-gray-900 dark:text-gray-50 line-clamp-2">${message}</h4>
+          <span class="text-xs bg-gray-100 dark:bg-gray-600 px-2 py-1 rounded font-mono">${sha}</span>
+        </div>
+        <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+          <span>Por: <strong>${author}</strong></span>
+          <span>${date}</span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  setHtml("commitList", commitsHtml);
+}
+
+function updateIssuesList(issues) {
+  const container = document.getElementById("issuesList");
+  if (!container || !issues?.length) {
+    setHtml(
+      "issuesList",
+      '<p class="text-gray-600 dark:text-gray-300 italic">Nenhuma issue encontrada.</p>'
+    );
+    return;
+  }
+
+  const issuesHtml = issues
+    .slice(0, 5)
+    .map((issue) => {
+      const title = issue.title || "Sem título";
+      const state = issue.state || "unknown";
+      const author = issue.user?.login || "Autor desconhecido";
+      const date = formatDate(issue.created_at);
+      const stateColor =
+        state === "open"
+          ? "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200"
+          : "bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-200";
+      const stateText = state === "open" ? "Aberta" : "Fechada";
+
+      return `
+      <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 hover:shadow-md transition-shadow">
+        <div class="flex items-start justify-between mb-2">
+          <h4 class="font-medium text-gray-900 dark:text-gray-50 line-clamp-2">${title}</h4>
+          <span class="text-xs px-2 py-1 rounded ${stateColor}">${stateText}</span>
+        </div>
+        <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+          <span>Por: <strong>${author}</strong></span>
+          <span>${date}</span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  setHtml("issuesList", issuesHtml);
+}
+
+function updateAdditionalStats(data) {
+  setText("statsRecentCommits", formatNumber(data.commits?.length || 2));
+
+  const totalIssues = data.issues?.length || 1;
+  const openIssues =
+    data.issues?.filter((issue) => issue.state === "open").length || 0;
+  const closedIssues = totalIssues - openIssues;
+
+  setText("statsRecentIssues", formatNumber(totalIssues));
+  setText(
+    "statsOpenIssues",
+    formatNumber(data.repoDetails?.open_issues_count || 0)
+  );
+  setText("statsClosedIssues", formatNumber(closedIssues));
+
+  if (data.languages) {
+    const languageCount = Object.keys(data.languages).length;
+    setText("languagesCount", formatNumber(languageCount));
+
+    const totalBytes = Object.values(data.languages).reduce(
+      (sum, bytes) => sum + bytes,
+      0
+    );
+    setText("totalCodeBytes", formatNumber(totalBytes));
+  }
+
+  const security = data.repoDetails?.security_and_analysis;
+  if (security) {
+    setText(
+      "secretScanning",
+      security.secret_scanning?.status === "enabled" ? "Ativo" : "Inativo"
+    );
+    setText(
+      "dependabotUpdates",
+      security.dependabot_security_updates?.status === "enabled"
+        ? "Ativo"
+        : "Inativo"
+    );
+  }
+}
+
+// Funções de visitas
+async function recordVisit() {
+  try {
+    await fetch("/api/visits", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent,
+        referrer: document.referrer,
+        url: window.location.href,
+      }),
+    });
+  } catch (error) {
+    console.error("Erro ao registrar visita:", error);
+  }
+}
+
+async function loadVisitStats() {
+  try {
+    const data = await fetchWithCache("/api/visits/stats");
+    if (data.success) {
+      updateVisitStats(data.data);
     }
-  };
+  } catch (error) {
+    console.error("Erro ao carregar estatísticas de visitas:", error);
+    // Usar dados padrão se a API falhar
+    updateVisitStats({
+      summary: {
+        totalVisits: 1,
+        uniqueVisitors: 1,
+      },
+      trends: {
+        last24hours: { totalVisits: 1 },
+        last7days: { totalVisits: 1 },
+      },
+      devices: {
+        deviceTypes: { Desktop: 1 },
+        browsers: { Chrome: 1 },
+        operatingSystems: { Windows: 1 },
+      },
+      timeAnalysis: {
+        hourly: { "12:00": 1 },
+      },
+    });
+  }
+}
 
-  showLoadingBar();
+function updateVisitStats(stats) {
+  // Compatibilidade com a nova estrutura de dados
+  const summary = stats.summary || {};
+  const devices = stats.devices || {};
+  const trends = stats.trends || {};
 
-  // Mobile Sidebar Menu Toggle
+  setText("visitsTotal", formatNumber(summary.totalVisits || 1));
+  setText("visitsUnique", formatNumber(summary.uniqueVisitors || 1));
+  setText("visits24h", formatNumber(trends.last24hours?.totalVisits || 1));
+  setText("visits7d", formatNumber(trends.last7days?.totalVisits || 1));
+  setText("visitCount", formatNumber(summary.totalVisits || 1));
+
+  // Atualizar gráficos de dispositivos, navegadores, etc.
+  if (devices.deviceTypes) {
+    updateStatsChart("visitDevices", devices.deviceTypes);
+  }
+  if (devices.browsers) {
+    updateStatsChart("visitBrowsers", devices.browsers);
+  }
+  if (devices.operatingSystems) {
+    updateStatsChart("visitOS", devices.operatingSystems);
+  }
+
+  // Atualizar horários de maior acesso se disponível
+  if (stats.timeAnalysis?.hourly) {
+    updateHourlyStats("visitHours", stats.timeAnalysis.hourly);
+  }
+}
+
+function updateStatsChart(containerId, data) {
+  const container = document.getElementById(containerId);
+  if (!container || !data) return;
+
+  const entries = Object.entries(data)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
+  const total = Object.values(data).reduce((sum, count) => sum + count, 0);
+
+  const chartHtml = entries
+    .map(([name, count]) => {
+      const percentage = ((count / total) * 100).toFixed(1);
+      return `
+      <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-600 rounded text-sm">
+        <span class="font-medium">${name}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-600 dark:text-gray-300">${count}</span>
+          <span class="text-xs text-gray-500">(${percentage}%)</span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  setHtml(containerId, chartHtml);
+}
+
+function updateHourlyStats(containerId, hourlyData) {
+  const container = document.getElementById(containerId);
+  if (!container || !hourlyData) return;
+
+  // Encontrar os 3 horários com mais acessos
+  const entries = Object.entries(hourlyData)
+    .filter(([hour, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 3);
+
+  if (entries.length === 0) {
+    setHtml(
+      containerId,
+      '<p class="text-gray-600 dark:text-gray-300 italic">Nenhum dado de horário disponível</p>'
+    );
+    return;
+  }
+
+  const chartHtml = entries
+    .map(([hour, count]) => {
+      return `
+      <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-600 rounded text-sm">
+        <span class="font-medium">${hour}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-600 dark:text-gray-300">${count} acesso${count > 1 ? "s" : ""}</span>
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  setHtml(containerId, chartHtml);
+}
+
+// Navegação e UI
+function setupNavigation() {
+  // Mobile menu
   const mobileMenuButton = document.getElementById("mobileMenuButton");
   const mobileSidebarMenu = document.getElementById("mobileSidebarMenu");
   const mobileSidebarOverlay = document.getElementById("mobileSidebarOverlay");
   const closeSidebarButton = document.getElementById("closeSidebarButton");
 
-  function openSidebar() {
-    mobileSidebarMenu.classList.remove("-translate-x-full");
-    mobileSidebarOverlay.classList.remove("hidden");
-    document.body.style.overflow = "hidden"; // Prevent body scroll when sidebar is open
-    mobileMenuButton.setAttribute("aria-expanded", "true");
-  }
-
-  function closeSidebar() {
-    mobileSidebarMenu.classList.add("-translate-x-full");
-    mobileSidebarOverlay.classList.add("hidden");
-    document.body.style.overflow = ""; // Restore body scroll
-    mobileMenuButton.setAttribute("aria-expanded", "false");
-  }
-
-  if (mobileMenuButton && mobileSidebarMenu && mobileSidebarOverlay) {
-    // Open sidebar when hamburger button is clicked
-    mobileMenuButton.addEventListener("click", openSidebar);
-
-    // Close sidebar when close button is clicked
-    if (closeSidebarButton) {
-      closeSidebarButton.addEventListener("click", closeSidebar);
-    }
-
-    // Close sidebar when overlay is clicked
-    mobileSidebarOverlay.addEventListener("click", closeSidebar);
-
-    // Close sidebar when a navigation link is clicked
-    mobileSidebarMenu.querySelectorAll(".sidebar-link").forEach((link) => {
-      link.addEventListener("click", () => {
-        closeSidebar();
-      });
-    });
-
-    // Close sidebar when Escape key is pressed
-    document.addEventListener("keydown", (event) => {
-      if (
-        event.key === "Escape" &&
-        !mobileSidebarMenu.classList.contains("-translate-x-full")
-      ) {
-        closeSidebar();
-      }
-    });
-
-    // Handle window resize - close sidebar if screen becomes desktop size
-    window.addEventListener("resize", () => {
-      if (window.innerWidth >= 768) {
-        // md breakpoint
-        closeSidebar();
-      }
-    });
-  }
-
-  // Update sidebar GitHub link when data is loaded
-  function updateSidebarGithubLink(url) {
-    const sidebarGithubLink = document.getElementById("sidebarGithubLink");
-    if (sidebarGithubLink && url) {
-      sidebarGithubLink.href = url;
+  function showMobileMenu() {
+    if (mobileSidebarMenu && mobileSidebarOverlay) {
+      mobileSidebarMenu.classList.remove("-translate-x-full");
+      mobileSidebarOverlay.classList.remove("hidden");
+      document.body.style.overflow = "hidden";
     }
   }
 
+  function hideMobileMenu() {
+    if (mobileSidebarMenu && mobileSidebarOverlay) {
+      mobileSidebarMenu.classList.add("-translate-x-full");
+      mobileSidebarOverlay.classList.add("hidden");
+      document.body.style.overflow = "";
+    }
+  }
+
+  mobileMenuButton?.addEventListener("click", showMobileMenu);
+  closeSidebarButton?.addEventListener("click", hideMobileMenu);
+  mobileSidebarOverlay?.addEventListener("click", hideMobileMenu);
+
+  // Smooth scrolling para links
+  document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+    anchor.addEventListener("click", function (e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute("href"));
+      if (target) {
+        target.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+        hideMobileMenu();
+      }
+    });
+  });
+}
+
+// Inicialização
+async function init() {
   try {
-    const [serverData, visitsData] = await Promise.all([
-      fetchServerData(),
-      fetchWithCache(CONFIG.API_ENDPOINTS.VISITS),
-    ]);
-
-    if (serverData) {
-      updateUI(serverData);
-      // Update sidebar GitHub link
-      if (serverData.repoDetails?.html_url) {
-        updateSidebarGithubLink(serverData.repoDetails.html_url);
-      }
-    } else {
-      // Handle case where serverData is null/undefined from fetchServerData (already throws, but as a fallback)
-      displayGlobalError(
-        "Não foi possível carregar os dados do projeto do servidor."
-      );
-      document
-        .querySelectorAll(".loading-placeholder")
-        .forEach((el) => (el.textContent = "Erro"));
+    // Configurar ano atual
+    const currentYearElement = document.getElementById("currentYear");
+    if (currentYearElement) {
+      currentYearElement.textContent = new Date().getFullYear();
     }
 
-    if (visitsData) {
-      setText("visitCount", formatNumber(visitsData.totalVisits));
-    }
-  } catch (error) {
-    console.error("Erro principal no carregamento da página:", error);
-    displayGlobalError(
-      error.message ||
-        "Ocorreu um erro crítico ao carregar os dados. Tente recarregar a página."
+    // Configurar navegação
+    setupNavigation();
+
+    // Registrar visita (não bloquear se falhar)
+    recordVisit().catch((err) =>
+      console.log("Visita não registrada:", err.message)
     );
-    // Ensure placeholders show an error state if main data loading fails
-    if (!clientCache.get(CONFIG.API_ENDPOINTS.GITHUB)) {
-      // Check if server data was never loaded
-      document.querySelectorAll(".loading-placeholder").forEach((el) => {
-        if (el.id !== "visitCount") el.textContent = "Erro";
-      });
+
+    // Tentar carregar dados do GitHub
+    try {
+      const data = await fetchWithCache("/api/server-data");
+      if (data.success) {
+        updateUI(data.data);
+      } else {
+        throw new Error(data.error || "Erro ao carregar dados");
+      }
+    } catch (error) {
+      console.log("API indisponível, usando dados de fallback");
+      updateUI(FALLBACK_DATA);
+    }
+
+    // Carregar estatísticas de visitas
+    await loadVisitStats();
+  } catch (error) {
+    console.error("Erro na inicialização:", error);
+
+    // Usar dados de fallback
+    updateUI(FALLBACK_DATA);
+
+    // Mostrar mensagem de erro
+    const errorContainer = document.getElementById("errorMessageGlobal");
+    if (errorContainer) {
+      errorContainer.innerHTML = `
+        <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
+          <strong>Aviso:</strong> Conectado no modo offline. Exibindo dados em cache.
+        </div>
+      `;
+      errorContainer.classList.remove("hidden");
     }
   }
-  completeLoadingBar();
-});
+}
+
+// Executar quando o DOM estiver carregado
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="https://iili.io/3DG6WBV.png" />
+    <title>Omnizap | Estatísticas de Visitas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-50 min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-blue-600 dark:bg-blue-700 text-white shadow-md">
+        <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3 sm:gap-4">
+                    <a href="/" class="text-white hover:text-gray-200 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                        </svg>
+                    </a>
+                    <img src="https://iili.io/3DG6WBV.png" alt="Omnizap Logo" class="h-8 sm:h-10 w-auto" />
+                    <h1 class="text-lg sm:text-xl md:text-2xl font-bold">Estatísticas de Visitas</h1>
+                </div>
+                <button id="refreshStats"
+                    class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-md text-sm font-medium transition-colors">
+                    Atualizar
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-grow">
+        <div id="loadingIndicator" class="text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <p class="mt-2 text-gray-600 dark:text-gray-400">Carregando estatísticas...</p>
+        </div>
+
+        <div id="statsContent" class="hidden space-y-6">
+            <!-- Resumo Geral -->
+            <section
+                class="bg-white dark:bg-gray-700 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-600">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-600 dark:text-blue-400">Resumo Geral</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Total de Visitas</h3>
+                        <p id="totalVisits" class="text-2xl font-bold text-blue-600 dark:text-blue-400">0</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Visitantes Únicos</h3>
+                        <p id="uniqueVisitors" class="text-2xl font-bold text-green-600 dark:text-green-400">0</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Primeiro Acesso</h3>
+                        <p id="firstVisit" class="text-sm text-gray-700 dark:text-gray-300">-</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Último Acesso</h3>
+                        <p id="lastVisit" class="text-sm text-gray-700 dark:text-gray-300">-</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dispositivos -->
+            <section
+                class="bg-white dark:bg-gray-700 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-600">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-600 dark:text-blue-400">Dispositivos e Tecnologia</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Tipos de Dispositivo</h3>
+                        <canvas id="deviceChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Navegadores Principais</h3>
+                        <div id="browserList" class="space-y-2"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Análise Temporal -->
+            <section
+                class="bg-white dark:bg-gray-700 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-600">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-600 dark:text-blue-400">Análise Temporal</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Acessos por Hora</h3>
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium mb-3">Acessos por Dia da Semana</h3>
+                        <canvas id="weekdayChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tendências -->
+            <section
+                class="bg-white dark:bg-gray-700 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-600">
+                <h2 class="text-2xl font-semibold mb-4 text-blue-600 dark:text-blue-400">Tendências Recentes</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Últimas 24h</h3>
+                        <p id="visits24h" class="text-xl font-bold text-purple-600 dark:text-purple-400">0 visitas</p>
+                        <p id="unique24h" class="text-sm text-gray-600 dark:text-gray-400">0 únicos</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Últimos 7 dias</h3>
+                        <p id="visits7d" class="text-xl font-bold text-orange-600 dark:text-orange-400">0 visitas</p>
+                        <p id="unique7d" class="text-sm text-gray-600 dark:text-gray-400">0 únicos</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-600 p-4 rounded-lg">
+                        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Últimos 30 dias</h3>
+                        <p id="visits30d" class="text-xl font-bold text-teal-600 dark:text-teal-400">0 visitas</p>
+                        <p id="unique30d" class="text-sm text-gray-600 dark:text-gray-400">0 únicos</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="visit-stats.js"></script>
+</body>
+
+</html>
