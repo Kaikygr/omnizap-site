@@ -1166,79 +1166,176 @@ async function loadIssues() {
 
     const issuesContainer = document.getElementById("issuesList");
 
-    if (!openIssues || openIssues.length === 0) {
+    // Combinar issues abertas e fechadas, priorizando as abertas
+    const allIssues = [...(openIssues || []), ...(closedIssues || [])];
+
+    if (!allIssues || allIssues.length === 0) {
       updateElementHtmlById(
         "issuesList",
-        '<p class="text-gray-600 dark:text-gray-300 italic">Nenhuma issue encontrada</p>'
+        `<div class="text-center py-8">
+          <div class="text-gray-400 dark:text-gray-500 mb-4">
+            <svg class="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+            </svg>
+          </div>
+          <p class="text-gray-600 dark:text-gray-300 text-lg">Nenhuma issue encontrada</p>
+          <p class="text-gray-500 dark:text-gray-400 text-sm mt-2">Este projeto não possui issues registradas no momento.</p>
+        </div>`
       );
     } else {
-      const issuesHtml = openIssues
-        .map(
-          (issue, index) => `
-        <div class="list-item-animated bg-gray-50 dark:bg-gray-600 p-4 rounded-lg border border-gray-200 dark:border-gray-500"
+      // Mostrar informações sobre o total de issues
+      const totalIssues = allIssues.length;
+      const openCount = openIssues.length;
+      const closedCount = closedIssues.length;
+
+      // Pegar as 5 mais recentes (priorizando abertas)
+      const recentIssues = allIssues.slice(0, 5);
+
+      let headerInfo = "";
+      if (totalIssues > 5) {
+        headerInfo = `<div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+          <p class="text-sm text-blue-700 dark:text-blue-300">
+            <strong>Mostrando as 5 issues mais recentes</strong> de um total de ${totalIssues} issues 
+            (${openCount} abertas, ${closedCount} fechadas)
+          </p>
+        </div>`;
+      }
+
+      const issuesHtml =
+        headerInfo +
+        recentIssues
+          .map(
+            (issue, index) => `
+        <div class="list-item-animated bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-600 dark:to-gray-700 p-4 rounded-lg border border-gray-200 dark:border-gray-500 hover:shadow-md transition-all duration-300"
              style="--animation-delay: ${index * 0.1}s">
           <div class="flex items-start gap-3">
-            <div class="flex-shrink-0">
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+            <div class="flex-shrink-0 pt-1">
+              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold shadow-sm
                          ${
                            issue.state === "open"
-                             ? "bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200"
-                             : "bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200"
+                             ? "bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 border border-green-300 dark:border-green-600"
+                             : "bg-purple-100 dark:bg-purple-800 text-purple-800 dark:text-purple-200 border border-purple-300 dark:border-purple-600"
                          }">
-                ${issue.state === "open" ? "Aberta" : "Fechada"}
+                ${issue.state === "open" ? "🟢 Aberta" : "🟣 Fechada"}
               </span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-2">
-                ${issue.title}
-              </p>
-              <div class="flex items-center gap-4 mt-2 text-xs text-gray-600 dark:text-gray-400">
-                <span>#${issue.number}</span>
-                <span>Por ${issue.user.login}</span>
-                <span>${getTimeAgo(issue.created_at)}</span>
-                <a href="${issue.html_url}" target="_blank" 
-                   class="text-blue-600 dark:text-blue-400 hover:underline">
-                  Ver Issue
-                </a>
+              <div class="flex items-start justify-between mb-2">
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 leading-5">
+                  ${issue.title}
+                </h3>
+                <span class="ml-2 text-xs bg-gray-200 dark:bg-gray-600 px-2 py-1 rounded font-mono text-gray-600 dark:text-gray-300 flex-shrink-0">
+                  #${issue.number}
+                </span>
               </div>
+              
+              <div class="flex flex-wrap items-center gap-3 mb-3 text-xs text-gray-600 dark:text-gray-400">
+                <div class="flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span>Por <strong>${issue.user.login}</strong></span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span>${getTimeAgo(issue.created_at)}</span>
+                </div>
+                ${
+                  issue.state === "closed" && issue.closed_at
+                    ? `
+                <div class="flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span>Fechada ${getTimeAgo(issue.closed_at)}</span>
+                </div>
+                `
+                    : ""
+                }
+              </div>
+
               ${
-                issue.labels.length > 0
+                issue.labels && issue.labels.length > 0
                   ? `
-                <div class="flex flex-wrap gap-1 mt-2">
+                <div class="flex flex-wrap gap-1 mb-3">
                   ${issue.labels
-                    .slice(0, 3)
+                    .slice(0, 4)
                     .map(
                       (label) => `
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
-                          style="background-color: #${label.color}20; color: #${label.color}">
+                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border"
+                          style="background-color: #${label.color}15; color: #${label.color}; border-color: #${label.color}40">
                       ${label.name}
                     </span>
                   `
                     )
                     .join("")}
+                  ${issue.labels.length > 4 ? `<span class="text-xs text-gray-500 dark:text-gray-400">+${issue.labels.length - 4} mais</span>` : ""}
                 </div>
               `
                   : ""
               }
+              
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                  ${
+                    issue.comments > 0
+                      ? `
+                  <div class="flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M18 13V5a2 2 0 00-2-2H4a2 2 0 00-2 2v8a2 2 0 002 2h3l3 3 3-3h3a2 2 0 002-2zM5 7a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm1 3a1 1 0 100 2h3a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                    </svg>
+                    <span>${issue.comments} comentários</span>
+                  </div>
+                  `
+                      : ""
+                  }
+                </div>
+                <a href="${issue.html_url}" target="_blank" rel="noopener noreferrer"
+                   class="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium transition-colors">
+                  <span>Ver no GitHub</span>
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                  </svg>
+                </a>
+              </div>
             </div>
           </div>
         </div>
       `
-        )
-        .join("");
+          )
+          .join("");
 
       updateElementHtmlById("issuesList", issuesHtml);
     }
 
-    updateElementTextById("statsRecentIssues", openIssues.length.toString());
+    updateElementTextById("statsRecentIssues", allIssues.length.toString());
     updateElementTextById("statsOpenIssues", openIssues.length.toString());
     updateElementTextById("statsClosedIssues", closedIssues.length.toString());
+
+    console.log(
+      `Issues carregadas: ${allIssues.length} total (${openIssues.length} abertas, ${closedIssues.length} fechadas)`
+    );
   } catch (error) {
     console.error("Erro ao carregar issues:", error);
     updateElementHtmlById(
       "issuesList",
-      '<p class="text-gray-600 dark:text-gray-300 italic">Erro ao carregar issues</p>'
+      `<div class="text-center py-8">
+        <div class="text-red-400 dark:text-red-500 mb-4">
+          <svg class="w-16 h-16 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-2-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <p class="text-gray-600 dark:text-gray-300 text-lg">Erro ao carregar issues</p>
+        <p class="text-gray-500 dark:text-gray-400 text-sm mt-2">Não foi possível conectar com o servidor ou a API do GitHub.</p>
+      </div>`
     );
+
+    // Definir valores padrão para as estatísticas em caso de erro
+    updateElementTextById("statsRecentIssues", "0");
+    updateElementTextById("statsOpenIssues", "0");
+    updateElementTextById("statsClosedIssues", "0");
   }
 }
 

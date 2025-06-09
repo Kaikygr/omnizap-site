@@ -607,10 +607,24 @@
     <!-- Seção Issues Recentes -->
     <section id="issues-section"
       class="bg-white dark:bg-gray-700 p-4 sm:p-6 md:p-8 rounded-xl shadow-lg dark:shadow-gray-600/30 border border-gray-200 dark:border-gray-600 hover:shadow-xl dark:hover:shadow-gray-600/50 transition-all duration-300 mt-6">
-      <h2
-        class="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6 text-blue-600 dark:text-blue-400 border-b border-gray-300 dark:border-gray-600 pb-3">
-        Issues Recentes
-      </h2>
+      <div
+        class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6 pb-3 border-b border-gray-300 dark:border-gray-600">
+        <h2 class="text-xl sm:text-2xl font-semibold text-blue-600 dark:text-blue-400 mb-2 sm:mb-0">
+          Issues do Projeto
+        </h2>
+        <div class="flex gap-4 text-sm">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-green-500"></span>
+            <span class="text-gray-600 dark:text-gray-300">Abertas: <strong id="statsOpenIssues"
+                class="text-green-600 dark:text-green-400">-</strong></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-red-500"></span>
+            <span class="text-gray-600 dark:text-gray-300">Fechadas: <strong id="statsClosedIssues"
+                class="text-red-600 dark:text-red-400">-</strong></span>
+          </div>
+        </div>
+      </div>
       <div id="issuesList" class="space-y-3 sm:space-y-4">
         <p class="text-gray-600 dark:text-gray-300 italic">Carregando issues...</p>
       </div>
