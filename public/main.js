@@ -483,20 +483,6 @@ function updateAdditionalStats(data) {
     );
     setText("totalCodeBytes", formatNumber(totalBytes));
   }
-
-  const security = data.repoDetails?.security_and_analysis;
-  if (security) {
-    setText(
-      "secretScanning",
-      security.secret_scanning?.status === "enabled" ? "Ativo" : "Inativo"
-    );
-    setText(
-      "dependabotUpdates",
-      security.dependabot_security_updates?.status === "enabled"
-        ? "Ativo"
-        : "Inativo"
-    );
-  }
 }
 
 // Funções de visitas
@@ -958,6 +944,25 @@ function updateRepositoryDataUI(data) {
   // Carregar informações do desenvolvedor se disponível
   if (data.owner) {
     loadDeveloperInfo(data.owner);
+  }
+
+  // Processar informações de segurança
+  const security = data.security_and_analysis;
+  if (security) {
+    setText(
+      "secretScanning",
+      security.secret_scanning?.status === "enabled" ? "Ativo" : "Inativo"
+    );
+    setText(
+      "dependabotUpdates",
+      security.dependabot_security_updates?.status === "enabled"
+        ? "Ativo"
+        : "Inativo"
+    );
+  } else {
+    // Valores padrão se não houver dados de segurança
+    setText("secretScanning", "Inativo");
+    setText("dependabotUpdates", "Inativo");
   }
 }
 
