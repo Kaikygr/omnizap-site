@@ -715,64 +715,6 @@ function setupNavigation() {
   });
 }
 
-// Inicialização
-async function init() {
-  try {
-    // Configurar ano atual
-    const currentYearElement = document.getElementById("currentYear");
-    if (currentYearElement) {
-      currentYearElement.textContent = new Date().getFullYear();
-    }
-
-    // Configurar navegação
-    setupNavigation();
-
-    // Registrar visita (não bloquear se falhar)
-    recordVisit().catch((err) =>
-      console.log("Visita não registrada:", err.message)
-    );
-
-    // Tentar carregar dados do GitHub
-    try {
-      const data = await fetchWithCache("/api/server-data");
-      if (data.success) {
-        updateUI(data.data);
-      } else {
-        throw new Error(data.error || "Erro ao carregar dados");
-      }
-    } catch (error) {
-      console.log("API indisponível, usando dados de fallback");
-      updateUI(FALLBACK_DATA);
-    }
-
-    // Carregar estatísticas de visitas
-    await loadVisitStats();
-  } catch (error) {
-    console.error("Erro na inicialização:", error);
-
-    // Usar dados de fallback
-    updateUI(FALLBACK_DATA);
-
-    // Mostrar mensagem de erro
-    const errorContainer = document.getElementById("errorMessageGlobal");
-    if (errorContainer) {
-      errorContainer.innerHTML = `
-        <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
-          <strong>Aviso:</strong> Conectado no modo offline. Exibindo dados em cache.
-        </div>
-      `;
-      errorContainer.classList.remove("hidden");
-    }
-  }
-}
-
-// Executar quando o DOM estiver carregado
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
-} else {
-  init();
-}
-
 // Configurações e constantes
 const GITHUB_API_BASE = "https://api.github.com";
 const REPO_OWNER = "kaikygr";
@@ -911,82 +853,111 @@ async function recordVisit() {
 // Função para carregar dados do repositório
 async function loadRepositoryData() {
   try {
+    // Tentar carregar primeiro do servidor local se disponível
+    try {
+      const serverData = await fetchWithRetry("/api/server-data");
+      if (serverData.success && serverData.data) {
+        const data = serverData.data.repoDetails;
+        updateRepositoryDataUI(data);
+
+        // Atualizar contagem de linhas de código do servidor
+        updateElementTextById(
+          "locCount",
+          formatNumber(serverData.data.locCount || 3277)
+        );
+
+        console.log("Dados do repositório carregados do servidor local");
+        return;
+      }
+    } catch (serverError) {
+      console.log(
+        "Servidor local indisponível, tentando GitHub API diretamente"
+      );
+    }
+
+    // Fallback para GitHub API diretamente
     const data = await fetchWithRetry(REPO_URL);
+    updateRepositoryDataUI(data);
 
-    // Atualizar informações básicas
-    updateElementTextById("projectName", data.name || "N/A");
-    updateElementTextById(
-      "projectDescription",
-      data.description || "Sem descrição disponível"
-    );
-    updateElementTextById("projectLanguage", data.language || "N/A");
-    updateElementTextById(
-      "stargazersCount",
-      formatNumber(data.stargazers_count || 0)
-    );
-    updateElementTextById("forksCount", formatNumber(data.forks_count || 0));
-    updateElementTextById(
-      "watchersCount",
-      formatNumber(data.watchers_count || 0)
-    );
-    updateElementTextById(
-      "openIssuesCount",
-      formatNumber(data.open_issues_count || 0)
-    );
-    updateElementTextById("repoSize", formatBytes((data.size || 0) * 1024));
-    updateElementTextById("licenseInfo", data.license?.name || "Sem licença");
+    // Atualizar contagem de linhas de código (valor fixo para API direta)
+    updateElementTextById("locCount", formatNumber(3277));
 
-    // Atualizar datas
-    updateElementTextById("createdAt", formatDate(data.created_at));
-    updateElementTextById("lastUpdated", formatDate(data.updated_at));
-    updateElementTextById("pushedAt", formatDate(data.pushed_at));
-
-    // Atualizar links
-    const projectLink = document.getElementById("projectHtmlUrl");
-    const headerGithubLink = document.getElementById("headerGithubLink");
-    const sidebarGithubLink = document.getElementById("sidebarGithubLink");
-
-    if (projectLink) projectLink.href = data.html_url;
-    if (headerGithubLink) headerGithubLink.href = data.html_url;
-    if (sidebarGithubLink) sidebarGithubLink.href = data.html_url;
-
-    // Atualizar informações avançadas
-    updateElementTextById("visibility", data.private ? "Privado" : "Público");
-    updateElementTextById("defaultBranch", data.default_branch || "main");
-    updateElementTextById("allowForking", data.allow_forking ? "Sim" : "Não");
-    updateElementTextById("isTemplate", data.is_template ? "Sim" : "Não");
-    updateElementTextById(
-      "hasIssues",
-      data.has_issues ? "Habilitado" : "Desabilitado"
-    );
-    updateElementTextById(
-      "hasProjects",
-      data.has_projects ? "Habilitado" : "Desabilitado"
-    );
-    updateElementTextById(
-      "hasWiki",
-      data.has_wiki ? "Habilitado" : "Desabilitado"
-    );
-    updateElementTextById(
-      "hasDiscussions",
-      data.has_discussions ? "Habilitado" : "Desabilitado"
-    );
-    updateElementTextById(
-      "networkCount",
-      formatNumber(data.network_count || 0)
-    );
-    updateElementTextById(
-      "subscribersCount",
-      formatNumber(data.subscribers_count || 0)
-    );
-
-    // Carregar informações do desenvolvedor
-    await loadDeveloperInfo(data.owner);
-
-    console.log("Dados do repositório carregados com sucesso");
+    console.log("Dados do repositório carregados da GitHub API");
   } catch (error) {
     console.error("Erro ao carregar dados do repositório:", error);
     showError("Não foi possível carregar as informações do repositório.");
+  }
+}
+
+// Função auxiliar para atualizar UI com dados do repositório
+function updateRepositoryDataUI(data) {
+  // Atualizar informações básicas
+  updateElementTextById("projectName", data.name || "N/A");
+  updateElementTextById(
+    "projectDescription",
+    data.description || "Sem descrição disponível"
+  );
+  updateElementTextById("projectLanguage", data.language || "N/A");
+  updateElementTextById(
+    "stargazersCount",
+    formatNumber(data.stargazers_count || 0)
+  );
+  updateElementTextById("forksCount", formatNumber(data.forks_count || 0));
+  updateElementTextById(
+    "watchersCount",
+    formatNumber(data.watchers_count || 0)
+  );
+  updateElementTextById(
+    "openIssuesCount",
+    formatNumber(data.open_issues_count || 0)
+  );
+  updateElementTextById("repoSize", formatBytes((data.size || 0) * 1024));
+  updateElementTextById("licenseInfo", data.license?.name || "Sem licença");
+
+  // Atualizar datas
+  updateElementTextById("createdAt", formatDate(data.created_at));
+  updateElementTextById("lastUpdated", formatDate(data.updated_at));
+  updateElementTextById("pushedAt", formatDate(data.pushed_at));
+
+  // Atualizar links
+  const projectLink = document.getElementById("projectHtmlUrl");
+  const headerGithubLink = document.getElementById("headerGithubLink");
+  const sidebarGithubLink = document.getElementById("sidebarGithubLink");
+
+  if (projectLink) projectLink.href = data.html_url;
+  if (headerGithubLink) headerGithubLink.href = data.html_url;
+  if (sidebarGithubLink) sidebarGithubLink.href = data.html_url;
+
+  // Atualizar informações avançadas
+  updateElementTextById("visibility", data.private ? "Privado" : "Público");
+  updateElementTextById("defaultBranch", data.default_branch || "main");
+  updateElementTextById("allowForking", data.allow_forking ? "Sim" : "Não");
+  updateElementTextById("isTemplate", data.is_template ? "Sim" : "Não");
+  updateElementTextById(
+    "hasIssues",
+    data.has_issues ? "Habilitado" : "Desabilitado"
+  );
+  updateElementTextById(
+    "hasProjects",
+    data.has_projects ? "Habilitado" : "Desabilitado"
+  );
+  updateElementTextById(
+    "hasWiki",
+    data.has_wiki ? "Habilitado" : "Desabilitado"
+  );
+  updateElementTextById(
+    "hasDiscussions",
+    data.has_discussions ? "Habilitado" : "Desabilitado"
+  );
+  updateElementTextById("networkCount", formatNumber(data.network_count || 0));
+  updateElementTextById(
+    "subscribersCount",
+    formatNumber(data.subscribers_count || 0)
+  );
+
+  // Carregar informações do desenvolvedor se disponível
+  if (data.owner) {
+    loadDeveloperInfo(data.owner);
   }
 }
 
@@ -1016,7 +987,22 @@ async function loadDeveloperInfo(owner) {
 // Função para carregar linguagens do repositório
 async function loadLanguages() {
   try {
-    const languages = await fetchWithRetry(`${REPO_URL}/languages`);
+    let languages = {};
+
+    // Tentar carregar primeiro do servidor local
+    try {
+      const serverData = await fetchWithRetry("/api/server-data");
+      if (serverData.success && serverData.data && serverData.data.languages) {
+        languages = serverData.data.languages;
+        console.log("Linguagens carregadas do servidor local");
+      }
+    } catch (serverError) {
+      console.log(
+        "Servidor local indisponível para linguagens, tentando GitHub API"
+      );
+      languages = await fetchWithRetry(`${REPO_URL}/languages`);
+    }
+
     const languagesContainer = document.getElementById("languagesChart");
 
     if (!languagesContainer || Object.keys(languages).length === 0) {
@@ -1084,7 +1070,22 @@ async function loadLanguages() {
 // Função para carregar commits recentes
 async function loadCommits() {
   try {
-    const commits = await fetchWithRetry(`${REPO_URL}/commits?per_page=10`);
+    let commits = [];
+
+    // Tentar carregar primeiro do servidor local
+    try {
+      const serverData = await fetchWithRetry("/api/server-data");
+      if (serverData.success && serverData.data && serverData.data.commits) {
+        commits = serverData.data.commits;
+        console.log("Commits carregados do servidor local");
+      }
+    } catch (serverError) {
+      console.log(
+        "Servidor local indisponível para commits, tentando GitHub API"
+      );
+      commits = await fetchWithRetry(`${REPO_URL}/commits?per_page=10`);
+    }
+
     const commitContainer = document.getElementById("commitList");
 
     if (!commits || commits.length === 0) {
@@ -1136,10 +1137,27 @@ async function loadCommits() {
 // Função para carregar issues recentes
 async function loadIssues() {
   try {
-    const [openIssues, closedIssues] = await Promise.all([
-      fetchWithRetry(`${REPO_URL}/issues?state=open&per_page=10`),
-      fetchWithRetry(`${REPO_URL}/issues?state=closed&per_page=100`),
-    ]);
+    let openIssues = [];
+    let closedIssues = [];
+
+    // Tentar carregar primeiro do servidor local
+    try {
+      const serverData = await fetchWithRetry("/api/server-data");
+      if (serverData.success && serverData.data && serverData.data.issues) {
+        const allIssues = serverData.data.issues;
+        openIssues = allIssues.filter((issue) => issue.state === "open");
+        closedIssues = allIssues.filter((issue) => issue.state === "closed");
+        console.log("Issues carregadas do servidor local");
+      }
+    } catch (serverError) {
+      console.log(
+        "Servidor local indisponível para issues, tentando GitHub API"
+      );
+      [openIssues, closedIssues] = await Promise.all([
+        fetchWithRetry(`${REPO_URL}/issues?state=open&per_page=10`),
+        fetchWithRetry(`${REPO_URL}/issues?state=closed&per_page=100`),
+      ]);
+    }
 
     const issuesContainer = document.getElementById("issuesList");
 
